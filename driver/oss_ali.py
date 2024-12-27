@@ -196,13 +196,66 @@ class AliyunOSSClient(BaseOSSClient):
         except OssError as e:
             raise OSSError(f"Failed to abort multipart upload: {str(e)}")
 
-    def upload_stream(self, stream: BinaryIO, object_name: str, progress_callback: Optional[ProgressCallback] = None) -> str:
-        """上传流数据"""
+    def upload_stream(self, input_stream, object_name: str, content_type: str = None) -> str:
+        """流式上传文件
+        Args:
+            input_stream: 输入流（需要支持read方法）
+            object_name: 对象名称
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
         try:
-            self.bucket.put_object(object_name, stream, progress_callback=progress_callback)
+            # 设置headers
+            headers = {}
+            if content_type:
+                headers['Content-Type'] = content_type
+            
+            # 使用put_object进行流式上传
+            self.bucket.put_object(
+                object_name,
+                input_stream,
+                headers=headers
+            )
+            
             return self.get_public_url(object_name)
-        except OssError as e:
-            raise UploadError(f"Failed to upload stream: {str(e)}")
+            
+        except Exception as e:
+            raise OSSError(f"Failed to upload stream: {str(e)}")
+
+    def download_stream(self, object_name: str, output_stream, chunk_size=1024*1024, progress_callback=None):
+        """流式下载文件
+        Args:
+            object_name: 对象名称
+            output_stream: 输出流（需要支持write方法）
+            chunk_size: 分块大小（默认1MB）
+            progress_callback: 进度回调函数
+        """
+        try:
+            # 获取对象
+            object_stream = self.bucket.get_object(object_name)
+            
+            # 获取文件大小
+            file_size = object_stream.content_length
+            downloaded = 0
+            
+            # 流式读取和写入
+            while True:
+                chunk = object_stream.read(chunk_size)
+                if not chunk:
+                    break
+                
+                output_stream.write(chunk)
+                downloaded += len(chunk)
+                
+                if progress_callback:
+                    progress_callback(downloaded)
+                
+            # 确保所有数据都写入
+            output_stream.flush()
+            
+        except Exception as e:
+            raise OSSError(f"Failed to download stream: {str(e)}")
 
     def object_exists(self, object_name: str) -> bool:
         """检查对象是否存在"""

@@ -462,7 +462,7 @@ class MinioClient(BaseOSSClient):
                 data_len = len(data_bytes)
                 data_to_upload = data_bytes
             
-            # 创建一个���单的进度跟踪器
+            # 创建一个单的进度跟踪器
             uploaded = 0
             def progress_callback(chunk_size):
                 nonlocal uploaded
@@ -578,6 +578,78 @@ class MinioClient(BaseOSSClient):
         except S3Error as e:
             raise GetUrlError(f"Failed to get file URL: {str(e)}")
 
+
+    def upload_stream(self, input_stream, object_name: str, content_type: str = None) -> str:
+        """流式上传文件
+        Args:
+            input_stream: 输入流（需要支持read方法）
+            object_name: 对象名称
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
+        try:
+            # 获取流的长度
+            if hasattr(input_stream, 'seek') and hasattr(input_stream, 'tell'):
+                # 如果流支持seek和tell，获取长度
+                current_pos = input_stream.tell()
+                input_stream.seek(0, os.SEEK_END)
+                length = input_stream.tell()
+                input_stream.seek(current_pos)  # 恢复原始位置
+            else:
+                # 如果不支持，读取到内存中
+                data = input_stream.read()
+                length = len(data)
+                input_stream = BytesIO(data)
+            
+            # 使用put_object进行流式上传
+            self.client.put_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name,
+                data=input_stream,
+                length=length,  # 添加长度参数
+                content_type=content_type or 'application/octet-stream'
+            )
+            
+            return self.get_public_url(object_name)
+            
+        except Exception as e:
+            raise OSSError(f"Failed to upload stream: {str(e)}")
+
+    def download_stream(self, object_name: str, output_stream, chunk_size=1024*1024, progress_callback=None):
+        """流式下载文件
+        Args:
+            object_name: 对象名称
+            output_stream: 输出流（需要支持write方法）
+            chunk_size: 分块大小（默认1MB）
+            progress_callback: 进度回调函数
+        """
+        try:
+            # 获取对象
+            response = self.client.get_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name
+            )
+            
+            # 获取文件大小
+            file_size = response.headers.get('content-length', 0)
+            downloaded = 0
+            
+            # 流式读取和写入
+            for chunk in response.stream(chunk_size):
+                output_stream.write(chunk)
+                downloaded += len(chunk)
+                
+                if progress_callback:
+                    progress_callback(downloaded)
+                    
+            # 确保所有数据都写入
+            output_stream.flush()
+            
+        except Exception as e:
+            raise OSSError(f"Failed to download stream: {str(e)}") 
+        
+        
     def delete_file(self, remote_path: str) -> None:
         """
         Delete a file from MinIO.

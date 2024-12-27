@@ -244,30 +244,33 @@ class AWSS3Client(BaseOSSClient):
             self.logger.error(f"Failed to upload file {local_file}: {str(e)}")
             raise UploadError(f"Failed to upload file {local_file}: {str(e)}")
 
-    def upload_stream(
-        self,
-        stream: BinaryIO,
-        object_name: str,
-        length: int = -1,
-        content_type: Optional[str] = None
-    ) -> str:
-        """从流中上传数据到S3"""
+    def upload_stream(self, input_stream, object_name: str, content_type: str = None) -> str:
+        """流式上传文件
+        Args:
+            input_stream: 输入流（需要支持read方法）
+            object_name: 对象名称
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
         try:
+            # 准备上传参数
             extra_args = {}
             if content_type:
                 extra_args['ContentType'] = content_type
-
+            
+            # 使用 upload_fileobj 进行流式上传
             self.client.upload_fileobj(
-                stream,
+                input_stream,
                 self.config.bucket_name,
                 object_name,
                 ExtraArgs=extra_args
             )
-
+            
             return self.get_public_url(object_name)
-
-        except ClientError as e:
-            raise ClientError(e.response, e.operation_name)
+            
+        except Exception as e:
+            raise OSSError(f"Failed to upload stream: {str(e)}")
 
     def download_file(self, object_name: str, local_file: str, progress_callback: Optional[ProgressCallback] = None) -> None:
         """
@@ -507,7 +510,7 @@ class AWSS3Client(BaseOSSClient):
             raise ClientError(e.response, e.operation_name)
 
     def abort_multipart_upload(self, upload: MultipartUpload) -> None:
-        """取消分��上传"""
+        """取消分片上传"""
         try:
             self.client.abort_multipart_upload(
                 Bucket=self.config.bucket_name,
@@ -640,3 +643,37 @@ class AWSS3Client(BaseOSSClient):
             if error_code == '404':
                 raise ObjectNotFoundError(f"Object not found: {object_name}")
             raise OSSError(f"Failed to get object size: {str(e)}") 
+
+    def download_stream(self, object_name: str, output_stream, chunk_size=1024*1024, progress_callback=None):
+        """流式下载文件
+        Args:
+            object_name: 对象名称
+            output_stream: 输出流（需要支持write方法）
+            chunk_size: 分块大小（默认1MB）
+            progress_callback: 进度回调函数
+        """
+        try:
+            # 获取对象
+            response = self.client.get_object(
+                Bucket=self.config.bucket_name,
+                Key=object_name
+            )
+            
+            # 获取文件大小
+            file_size = response['ContentLength']
+            downloaded = 0
+            
+            # 流式读取和写入
+            body = response['Body']
+            for chunk in iter(lambda: body.read(chunk_size), b''):
+                output_stream.write(chunk)
+                downloaded += len(chunk)
+                
+                if progress_callback:
+                    progress_callback(downloaded)
+                    
+            # 确保所有数据都写入
+            output_stream.flush()
+            
+        except Exception as e:
+            raise OSSError(f"Failed to download stream: {str(e)}") 
