@@ -24,7 +24,7 @@ class AliyunOSSClient(BaseOSSClient):
 
     def __init__(self, config: OSSConfig):
         """初始化阿里云OSS客户端"""
-        self.config = config
+        super().__init__(config)  # 调用基类的初始化方法
         self._init_client()
 
     def _init_client(self) -> None:

@@ -1,3 +1,4 @@
 config.json
 driver/__pycache__/aliyun_oss.cpython-312.pyc
 *.pyc
+ossnake.log

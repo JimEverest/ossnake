@@ -5,13 +5,17 @@ from datetime import datetime
 @dataclass
 class OSSConfig:
     """OSS配置类"""
-    endpoint: str
+    # 基本配置
     access_key: str
     secret_key: str
     bucket_name: str
-    secure: bool = True
+    
+    # 可选配置
+    provider: str = None  # 添加provider字段
+    endpoint: Optional[str] = None
     region: Optional[str] = None
-    proxy: Optional[str] = None  # 添加代理配置
+    secure: bool = True
+    proxy: Optional[dict] = None
 
 @dataclass
 class TransferProgress:

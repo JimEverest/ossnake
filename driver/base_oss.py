@@ -2,6 +2,25 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, BinaryIO, Dict
 import os
 from .types import OSSConfig, ProgressCallback, MultipartUpload
+import functools
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+import logging
+
+def with_timeout(timeout_seconds=30):
+    """超时装饰器"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+                try:
+                    return future.result(timeout=timeout_seconds)
+                except TimeoutError:
+                    raise ConnectionError(f"Operation timed out after {timeout_seconds} seconds")
+        return wrapper
+    return decorator
 
 class BaseOSSClient(ABC):
     """统一的OSS客户端基类"""
@@ -10,6 +29,19 @@ class BaseOSSClient(ABC):
     
     def __init__(self, config: OSSConfig):
         self.config = config
+        self.connected = False
+        self.logger = logging.getLogger(__name__)
+        try:
+            self._init_client_with_timeout()
+            self.connected = True
+        except Exception as e:
+            self.logger.error(f"Failed to initialize client: {str(e)}")
+            self.connected = False
+            raise
+    
+    @with_timeout(30)
+    def _init_client_with_timeout(self):
+        """带超时的客户端初始化"""
         self._init_client()
     
     @abstractmethod
@@ -58,10 +90,9 @@ class BaseOSSClient(ABC):
         """上传流数据并返回可访问的URL"""
         pass
     
-    @abstractmethod
-    def download_file(self, object_name: str, local_file: str, progress_callback: Optional[ProgressCallback] = None) -> None:
-        """下载文件到本地"""
-        pass
+    def download_file(self, remote_path: str, local_path: str, progress_callback=None):
+        """下载文件"""
+        raise NotImplementedError
     
     @abstractmethod
     def delete_file(self, object_name: str) -> None:
@@ -139,7 +170,7 @@ class BaseOSSClient(ABC):
             raise ConnectionError(f"Network error: {error_msg}")
     
     def _handle_sdk_error(self, error, operation: str = None):
-        """统一的SDK错误处理"""
+        """统一处理SDK错误"""
         error_msg = str(error).lower()
         error_info = {
             'operation': operation,

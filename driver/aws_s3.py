@@ -29,7 +29,7 @@ class AWSS3Client(BaseOSSClient):
 
     def __init__(self, config: OSSConfig):
         """初始化AWS S3客户端"""
-        self.config = config
+        super().__init__(config)  # 调用基类的初始化方法
         
         try:
             # 配置代理
@@ -272,59 +272,46 @@ class AWSS3Client(BaseOSSClient):
         except Exception as e:
             raise OSSError(f"Failed to upload stream: {str(e)}")
 
-    def download_file(self, object_name: str, local_file: str, progress_callback: Optional[ProgressCallback] = None) -> None:
-        """
-        从S3下载文件到本地
-
-        Args:
-            object_name: S3对象名称
-            local_file: 本地文件保存路径
-            progress_callback: 进度回调接口
-        Raises:
-            ClientError: 对象不存在或其他S3错误
-            OSError: 本地文件系统错误
-        """
+    def download_file(self, remote_path: str, local_path: str, progress_callback=None):
+        """下载文件"""
         try:
             # 确保目标目录存在
-            os.makedirs(os.path.dirname(os.path.abspath(local_file)), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
+            
+            # 获取文件总大小
+            total_size = self.get_object_size(remote_path)
+            transferred = 0
+            
+            # 创建进度回调包装器
+            config = TransferConfig(
+                use_threads=True,
+                max_concurrency=10,
+                multipart_threshold=1024 * 1024 * 8,  # 8MB
+                multipart_chunksize=1024 * 1024 * 8  # 8MB
+            )
             
             if progress_callback:
-                total_size = self.client.head_object(Bucket=self.config.bucket_name, Key=object_name)['ContentLength']
-                start_time = datetime.now()
-
-                def progress_handler(bytes_amount):
+                def s3_callback(bytes_amount):
+                    nonlocal transferred
+                    transferred += bytes_amount
                     try:
-                        elapsed = (datetime.now() - start_time).total_seconds()
-                        speed = bytes_amount / elapsed if elapsed > 0 else 0
-                        progress_callback.on_progress(
-                            bytes_amount,
-                            total_size,
-                            start_time,
-                            speed
-                        )
+                        progress_callback(transferred, total_size)
                     except Exception as e:
-                        if isinstance(e, TransferError):
-                            raise
                         self.logger.warning(f"Progress callback failed: {e}")
             else:
-                progress_handler = None
-
-            try:
-                self.client.download_file(
-                    self.config.bucket_name,
-                    object_name,
-                    local_file,
-                    Callback=progress_handler
-                )
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'NoSuchKey' or e.response['Error']['Code'] == '404':
-                    raise ObjectNotFoundError(f"Object not found: {object_name}")
-                raise e
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey' or e.response['Error']['Code'] == '404':
-                raise ObjectNotFoundError(f"Object not found: {object_name}")
-            raise ClientError(e.response, e.operation_name)
+                s3_callback = None
+            
+            # 执行下载
+            self.client.download_file(
+                self.config.bucket_name,
+                remote_path,
+                local_path,
+                Config=config,
+                Callback=s3_callback
+            )
+            
+        except Exception as e:
+            raise OSSError(f"Failed to download file: {str(e)}")
 
     def delete_file(self, object_name: str) -> None:
         """删除文件"""
@@ -677,3 +664,21 @@ class AWSS3Client(BaseOSSClient):
             
         except Exception as e:
             raise OSSError(f"Failed to download stream: {str(e)}") 
+
+    def get_object_info(self, object_name: str) -> Dict:
+        """获取对象信息"""
+        try:
+            response = self.client.head_object(
+                Bucket=self.config.bucket_name,
+                Key=object_name
+            )
+            return {
+                'size': response.get('ContentLength', 0),
+                'type': response.get('ContentType', ''),
+                'last_modified': response.get('LastModified', ''),
+                'etag': response.get('ETag', '').strip('"')
+            }
+        except self.client.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                raise ObjectNotFoundError(f"Object not found: {object_name}")
+            raise OSSError(f"Failed to get object info: {str(e)}") 

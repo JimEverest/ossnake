@@ -40,7 +40,7 @@ class MinioClient(BaseOSSClient):
 
     def __init__(self, config: OSSConfig):
         """初始化MinIO客户端"""
-        self.config = config
+        super().__init__(config)  # 调用基类的初始化方法
         self.logger = logging.getLogger(__name__)
         
         try:
@@ -89,26 +89,52 @@ class MinioClient(BaseOSSClient):
             raise ConnectionError(f"Failed to initialize MinIO client: {str(e)}")
 
     def _init_client(self) -> None:
-        """初始化 MinIO 客户端"""
+        """初始化MinIO客户端"""
         try:
-            # 添加超时配置
+            # 创建 HTTP 客户端配置
+            http_client = self._create_http_client_config()
+            
+            # 创建MinIO客户端
             self.client = Minio(
                 self.config.endpoint,
                 access_key=self.config.access_key,
                 secret_key=self.config.secret_key,
                 secure=self.config.secure,
-                # 添加超时设置
-                http_client=urllib3.PoolManager(
-                    timeout=urllib3.Timeout(connect=5.0, read=10.0),
-                    retries=urllib3.Retry(
-                        total=3,
-                        backoff_factor=0.2,
-                        status_forcelist=[500, 502, 503, 504]
-                    )
-                )
+                http_client=http_client
             )
+            
+            # 测试连接
+            self.client.list_buckets()
+            self.logger.info("Successfully connected to MinIO server")
+            
         except Exception as e:
-            raise ConnectionError(f"Failed to initialize MinIO client: {str(e)}")
+            self.logger.error(f"Failed to connect to MinIO server: {str(e)}")
+            raise ConnectionError(f"Failed to connect to MinIO server: {str(e)}")
+    
+    def _create_http_client_config(self):
+        """创建HTTP客户端配置"""
+        # 基本的超时和重试配置
+        timeout = urllib3.Timeout(connect=5.0, read=60.0)
+        retries = urllib3.Retry(
+            total=3,
+            backoff_factor=0.2,
+            status_forcelist=[500, 502, 503, 504]
+        )
+        
+        # 检查是否需要配置代理
+        if hasattr(self.config, 'proxy') and self.config.proxy:
+            return urllib3.ProxyManager(
+                self.config.proxy,
+                timeout=timeout,
+                maxsize=8,
+                retries=retries
+            )
+        else:
+            return urllib3.PoolManager(
+                timeout=timeout,
+                maxsize=8,
+                retries=retries
+            )
 
     def _ensure_bucket(self):
         """
@@ -724,7 +750,7 @@ class MinioClient(BaseOSSClient):
     def rename_folder(self, source_prefix: str, target_prefix: str) -> None:
         """重命名文件夹（移动所有文件到新路径）
         Args:
-            source_prefix: 源文件夹路径（以/结尾）
+            source_prefix: 源文件夹路径（以/结���）
             target_prefix: 目标文件夹路径（以/结尾）
         """
         try:
