@@ -426,11 +426,28 @@ class ObjectList(ttk.Frame):
     
     def _upload_thread(self, local_file, object_name):
         try:
-            # 创建进度窗口
-            progress_win = ProgressDialog(self, f"上传 {object_name}")
+            # 获取文件大小和计算分片信息
+            file_size = os.path.getsize(local_file)
+            chunk_size = 5 * 1024 * 1024  # 5MB
+            is_multipart = file_size > chunk_size
             
-            def progress_callback(transferred, total):
+            # 正确计算分片数量
+            total_parts = (file_size + chunk_size - 1) // chunk_size if is_multipart else 0
+            
+            self.logger.info(f"Starting upload: {object_name}, size: {file_size}, parts: {total_parts}")
+            
+            # 创建进度窗口
+            progress_win = ProgressDialog(
+                self,
+                f"上传 {object_name}",
+                multipart=is_multipart,
+                total_parts=total_parts
+            )
+            
+            def progress_callback(transferred, total, part_number=None, part_transferred=None, part_total=None):
                 progress_win.update_progress(transferred, total)
+                if part_number is not None:
+                    progress_win.update_part_progress(part_number, part_transferred, part_total)
             
             # 构建完整的远程路径（考虑当前目录）
             if self.current_path:
@@ -440,11 +457,11 @@ class ObjectList(ttk.Frame):
             
             # 使用传输管理器上传
             from utils.transfer_manager import TransferManager
-            manager = TransferManager()
+            manager = TransferManager(chunk_size=chunk_size)  # 确保使用相同的分片大小
             manager.upload_file(
                 self.oss_client,
                 local_file,
-                remote_path,  # 使用完整路径
+                remote_path,
                 progress_callback=progress_callback
             )
             
@@ -453,6 +470,7 @@ class ObjectList(ttk.Frame):
             messagebox.showinfo("成功", f"上传成功: {object_name}")
             
         except Exception as e:
+            self.logger.error(f"Upload failed: {str(e)}")
             messagebox.showerror("错误", f"上传失败: {str(e)}")
     
     def start_upload(self):

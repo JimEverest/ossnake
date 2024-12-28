@@ -5,18 +5,42 @@ import time
 import logging
 
 class ProgressDialog(tk.Toplevel):
-    def __init__(self, parent, title="进度", message="正在处理..."):
+    def __init__(self, parent, title="进度", message="正在处理...", multipart=False, total_parts=0):
         super().__init__(parent)
         self.title(title)
-        self.geometry("400x180")
+        
+        # 根据分片数量动态计算窗口高度
+        base_height = 180  # 基础高度
+        part_height = 35   # 每个分片进度条的高度
+        padding = 20       # 额外padding
+        
+        if multipart and total_parts > 0:
+            window_height = base_height + (part_height * total_parts) + padding
+        else:
+            window_height = base_height
+            
+        self.geometry(f"400x{window_height}")
         self.resizable(False, False)
         
         # 设置模态
         self.transient(parent)
         self.grab_set()
         
+        # 创建主滚动框架
+        self.canvas = tk.Canvas(self)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
         # 主框架
-        self.main_frame = ttk.Frame(self)
+        self.main_frame = ttk.Frame(self.scrollable_frame)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # 消息标签
@@ -79,7 +103,7 @@ class ProgressDialog(tk.Toplevel):
         self.start_time = None
         self.transferred = 0
         
-        # 添加时间���踪变量
+        # 添加时间追踪变量
         self.last_update_time = None
         self.last_transferred = 0
         self.logger = logging.getLogger(__name__)
@@ -89,7 +113,36 @@ class ProgressDialog(tk.Toplevel):
         
         # 设置最小尺寸
         self.minsize(400, 180)
-    
+        
+        # 如果是分片上传，添加分片进度显示
+        if multipart and total_parts > 0:
+            # 分片进度框架
+            self.parts_frame = ttk.LabelFrame(self.main_frame, text="分片进度")
+            self.parts_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            
+            # 创建分片进度条
+            self.part_progresses = {}
+            self.part_labels = {}
+            for i in range(1, total_parts + 1):
+                frame = ttk.Frame(self.parts_frame)
+                frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                label = ttk.Label(frame, text=f"分片 {i}", width=10)
+                label.pack(side=tk.LEFT)
+                
+                progress = ttk.Progressbar(frame, mode='determinate')
+                progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                
+                self.part_progresses[i] = progress
+                self.part_labels[i] = label
+        
+        # 布局滚动区域
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+        
+        # 绑定鼠标滚轮
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
+        
     def center_window(self):
         """将窗口居中显示"""
         self.update_idletasks()
@@ -182,3 +235,17 @@ class ProgressDialog(tk.Toplevel):
         if hasattr(self, 'progress_bar') and self.progress_bar:
             self.progress_bar.stop()  # 停止进度条动画
         super().destroy() 
+    
+    def update_part_progress(self, part_number: int, transferred: int, total: int):
+        """更新分片进度"""
+        if hasattr(self, 'part_progresses') and part_number in self.part_progresses:
+            percentage = min(100, (transferred * 100) / total)
+            self.part_progresses[part_number]['value'] = percentage
+            self.part_labels[part_number].config(
+                text=f"分片 {part_number}: {percentage:.1f}%"
+            )
+            self.update_idletasks() 
+    
+    def _on_mousewheel(self, event):
+        """处理鼠标滚轮事件"""
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units") 
