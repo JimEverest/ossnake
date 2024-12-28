@@ -259,11 +259,11 @@ class MinioClient(BaseOSSClient):
             if progress_callback and total_size > 0:
                 class ProgressWrapper:
                     def __init__(self):
-                        self.transferred = 0
+                        self._transferred = 0
                         
                     def __call__(self, chunk_size):
-                        self.transferred += chunk_size
-                        progress_callback(self.transferred, total_size)
+                        self._transferred += int(chunk_size)  # 确保是整数
+                        progress_callback(self._transferred, total_size)
                     
                     def update(self, chunk_size):
                         """MinIO需要这个方法"""
@@ -451,15 +451,43 @@ class MinioClient(BaseOSSClient):
         content_type, _ = mimetypes.guess_type(filename)
         return content_type or 'application/octet-stream' 
 
-    def upload_file(
-        self,
-        local_file: str,
-        object_name: Optional[str] = None,
-        progress_callback: Optional[ProgressCallback] = None,
-        content_type: Optional[str] = None
-    ) -> str:
-        """上传文件到MinIO并返回可访问的URL"""
-        return self._upload_file(local_file, object_name, progress_callback)
+    def upload_file(self, local_file: str, object_name: str, progress_callback=None) -> str:
+        """上传文件"""
+        try:
+            # 创建进度回调包装器
+            if progress_callback:
+                file_size = os.path.getsize(local_file)
+                
+                class ProgressWrapper:
+                    def __init__(self):
+                        self._seen_so_far = 0
+                        
+                    def __call__(self, size):
+                        self._seen_so_far += size
+                        progress_callback(self._seen_so_far)
+                        
+                    def update(self, size):
+                        self.__call__(size)
+                        
+                    def set_meta(self, **kwargs):
+                        pass
+                
+                callback = ProgressWrapper()
+            else:
+                callback = None
+
+            # 执行上传
+            self.client.fput_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name,
+                file_path=local_file,
+                progress=callback
+            )
+            
+            return self.get_public_url(object_name)
+            
+        except Exception as e:
+            raise UploadError(f"Failed to upload file: {str(e)}")
 
     def init_multipart_upload(self, object_name: str) -> MultipartUpload:
         """初始化分片上传"""
@@ -569,17 +597,16 @@ class MinioClient(BaseOSSClient):
             
             total_time = time.time() - start_time
             self.logger.info(f"\nComplete Multipart Upload Timing:")
-            self.logger.info(f"  • Parts Preparation: {prep_time:.2f}s")
-            self.logger.info(f"  • Server Completion: {completion_time:.2f}s")
-            self.logger.info(f"  • URL Generation: {url_time:.2f}s")
-            self.logger.info(f"  • Total Time: {total_time:.2f}s")
+            self.logger.info(f"- Parts Preparation: {prep_time:.2f}s")
+            self.logger.info(f"- Server Completion: {completion_time:.2f}s")
+            self.logger.info(f"- URL Generation: {url_time:.2f}s")
+            self.logger.info(f"- Total Time: {total_time:.2f}s")
             
             return url
-
+            
         except Exception as e:
             self.logger.error(f"Failed to complete multipart upload: {e}")
             self.logger.error(f"Exception type: {type(e)}")
-            self.logger.error(f"Traceback: {traceback.format_exc()}")
             raise OSSError(f"Failed to complete multipart upload: {e}")
 
     def abort_multipart_upload(self, upload: MultipartUpload) -> None:
@@ -790,7 +817,7 @@ class MinioClient(BaseOSSClient):
             raise OSSError(f"Failed to rename folder: {str(e)}")
 
     def object_exists(self, object_name: str) -> bool:
-        """查对象是否存在"""
+        """��对象是否存在"""
         try:
             self.client.stat_object(
                 bucket_name=self.config.bucket_name,

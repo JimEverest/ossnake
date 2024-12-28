@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 import threading
 import time
+import logging
 
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, title="进度", message="正在处理..."):
@@ -78,6 +79,11 @@ class ProgressDialog(tk.Toplevel):
         self.start_time = None
         self.transferred = 0
         
+        # 添加时间���踪变量
+        self.last_update_time = None
+        self.last_transferred = 0
+        self.logger = logging.getLogger(__name__)
+        
         # 居中显示
         self.center_window()
         
@@ -93,33 +99,65 @@ class ProgressDialog(tk.Toplevel):
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f'{width}x{height}+{x}+{y}')
     
-    def update_progress(self, percentage, current_file=None, transferred=None, total=None):
-        """更新进度"""
-        self.progress_var.set(percentage)
-        
-        if current_file:
-            self.file_var.set(f"当前文件: {current_file}")
-        
-        if transferred is not None and total is not None:
-            if self.start_time is None:
-                self.start_time = time.time()
-                self.transferred = 0
+    def update_progress(self, transferred, total, current_file=None, *args):
+        """更新进度
+        Args:
+            transferred: 已传输字节数
+            total: 总字节数
+            current_file: 当前文件名（可选）
+            *args: 其他参数（向后兼容）
+        """
+        try:
+            if total > 0:
+                # 确保使用整数计算避免精度问题
+                transferred = int(transferred)
+                total = int(total)
+                
+                # 计算百分比
+                percentage = min(100, (transferred * 100) / total)
+                self.progress_var.set(percentage)
+                
+                # 更新文件信息
+                if current_file:
+                    self.file_var.set(f"当前文件: {current_file}")
+                else:
+                    self.file_var.set(f"已传输: {self.format_size(transferred)} / {self.format_size(total)}")
+                
+                # 计算速度
+                current_time = time.time()
+                if self.start_time is None:
+                    self.start_time = current_time
+                    self.last_update_time = current_time
+                    self.last_transferred = 0
+                else:
+                    # 计算这一段时间的速度
+                    time_diff = current_time - self.last_update_time
+                    if time_diff >= 0.5:  # 每0.5秒更新一次速度
+                        bytes_diff = transferred - self.last_transferred
+                        speed = bytes_diff / time_diff
+                        self.speed_var.set(f"速度: {self.format_speed(speed)}")
+                        
+                        # 更新上次的值
+                        self.last_update_time = current_time
+                        self.last_transferred = transferred
             
-            elapsed = time.time() - self.start_time
-            if elapsed > 0:
-                speed = transferred / elapsed
-                self.speed_var.set(f"速度: {self.format_speed(speed)} ({self.format_size(transferred)}/{self.format_size(total)})")
-        
-        self.update_idletasks()
+            self.update_idletasks()
+            
+        except Exception as e:
+            self.logger.error(f"Error updating progress: {str(e)}")
     
     @staticmethod
-    def format_size(size):
+    def format_size(size: int) -> str:
         """格式化文件大小"""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size < 1024:
-                return f"{size:.1f} {unit}"
-            size /= 1024
-        return f"{size:.1f} PB"
+        try:
+            size = int(size)  # 确保是整数
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if size < 1024:
+                    return f"{size:.1f} {unit}"
+                size /= 1024.0  # 使用浮点数除法
+            return f"{size:.1f} PB"
+        except Exception:
+            return "0 B"
     
     @staticmethod
     def format_speed(speed):
@@ -134,3 +172,13 @@ class ProgressDialog(tk.Toplevel):
         self.speed_var.set("")
         self.progress_bar.config(mode='indeterminate')
         self.progress_bar.start(10)  # 开始动画 
+    
+    def close(self):
+        """关闭对话框"""
+        self.destroy()  # 使用 destroy 替代 close
+    
+    def destroy(self):
+        """重写 destroy 方法，确保清理"""
+        if hasattr(self, 'progress_bar') and self.progress_bar:
+            self.progress_bar.stop()  # 停止进度条动画
+        super().destroy() 

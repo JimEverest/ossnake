@@ -197,7 +197,7 @@ class AWSS3Client(BaseOSSClient):
                 raise
             raise UploadError(f"Upload failed: {str(e)}")
 
-    def upload_file(self, local_file: str, object_name: str, progress_callback: ProgressCallback = None) -> str:
+    def upload_file(self, local_file: str, object_name: str, progress_callback=None) -> str:
         """Upload a file to S3"""
         try:
             # 创建一个 S3 传输配置
@@ -205,8 +205,7 @@ class AWSS3Client(BaseOSSClient):
                 multipart_threshold=8 * 1024 * 1024,  # 8MB
                 max_concurrency=10,
                 multipart_chunksize=8 * 1024 * 1024,  # 8MB
-                use_threads=True,
-                max_bandwidth=None  # 不限制带宽
+                use_threads=True
             )
 
             # 创建一个进度回调包装器
@@ -222,7 +221,7 @@ class AWSS3Client(BaseOSSClient):
                     def __call__(self, bytes_amount):
                         with self._lock:
                             self._seen_so_far += bytes_amount
-                            progress_callback(self._seen_so_far, self._size)
+                            progress_callback(self._seen_so_far)
 
                 callback = ProgressPercentage()
             else:
@@ -455,9 +454,8 @@ class AWSS3Client(BaseOSSClient):
                 Key=object_name
             )
             return MultipartUpload(
-                upload_id=response['UploadId'],
                 object_name=object_name,
-                total_parts=0
+                upload_id=response['UploadId']
             )
         except ClientError as e:
             raise ClientError(e.response, e.operation_name)
@@ -543,7 +541,7 @@ class AWSS3Client(BaseOSSClient):
             source_key: 源对象路径
             target_key: 目标对象路径
         Returns:
-            str: 新对象的URL
+            str: 新对象��URL
         """
         try:
             # 1. 复制对象

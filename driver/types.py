@@ -1,5 +1,5 @@
 from typing import Optional, List, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 @dataclass
@@ -57,8 +57,12 @@ class ProgressCallback:
 @dataclass
 class MultipartUpload:
     """分片上传信息"""
+    object_name: str
+    upload_id: str
+    parts: list = field(default_factory=list)  # 使用 field 设置默认值
+    part_size: int = 5 * 1024 * 1024  # 默认 5MB 分片大小
+
     def __init__(self, object_name: str, upload_id: str):
         self.object_name = object_name
         self.upload_id = upload_id
         self.parts = []  # List of (part_number, etag)
-        self.part_size = 5 * 1024 * 1024  # 默认 5MB 分片大小

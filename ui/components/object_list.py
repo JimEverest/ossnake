@@ -1,7 +1,6 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog, messagebox
 import logging
-from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
 import base64
@@ -9,6 +8,14 @@ from io import BytesIO
 from tkinter import filedialog
 from .progress_dialog import ProgressDialog
 import threading
+
+# 尝试导入 tkinterdnd2，如果不可用则禁用拖放功能
+try:
+    import tkinterdnd2
+    DRAG_DROP_SUPPORTED = True
+except ImportError:
+    DRAG_DROP_SUPPORTED = False
+    logging.warning("tkinterdnd2 not available, drag and drop will be disabled")
 
 class ObjectList(ttk.Frame):
     """对象列表组件"""
@@ -38,6 +45,14 @@ class ObjectList(ttk.Frame):
         # 创建工具栏
         self.toolbar = ttk.Frame(self)
         self.toolbar.pack(fill=tk.X, padx=5, pady=(0, 5))
+        
+        # 添加上传按钮
+        self.upload_btn = ttk.Button(
+            self.toolbar,
+            text="上传",
+            command=self.start_upload
+        )
+        self.upload_btn.pack(side=tk.LEFT, padx=2)
         
         # 添加路径导航
         self.path_var = tk.StringVar(value="/")
@@ -99,6 +114,11 @@ class ObjectList(ttk.Frame):
         
         # 绑定右键菜单
         self.tree.bind('<Button-3>', self.show_context_menu)
+        
+        # 启用拖放功能（如果支持）
+        if DRAG_DROP_SUPPORTED:
+            self.tree.drop_target_register('DND_Files')
+            self.tree.dnd_bind('<<Drop>>', self.on_drop)
     
     def load_objects(self, path=""):
         """加载指定路径下的对象"""
@@ -272,17 +292,15 @@ class ObjectList(ttk.Frame):
                     try:
                         # 获取文件大小
                         file_info = self.oss_client.get_object_info(full_path)
-                        total_size = file_info.get('size', 0)
+                        total_size = int(file_info.get('size', 0))
                         
                         # 创建进度回调
                         def progress_callback(transferred, total):
                             if not progress.cancelled:
-                                percentage = (current_item + transferred/total) / total_items * 100
                                 progress.update_progress(
-                                    percentage,
-                                    name,
                                     transferred,
-                                    total
+                                    total,
+                                    name
                                 )
                         
                         # 下载文件
@@ -293,7 +311,6 @@ class ObjectList(ttk.Frame):
                         )
                     except Exception as e:
                         if progress.cancelled:
-                            # 如果是取消导致的异常，删除未完成的文件
                             if os.path.exists(local_path):
                                 os.remove(local_path)
                             break
@@ -305,7 +322,7 @@ class ObjectList(ttk.Frame):
             if progress.cancelled:
                 progress.file_var.set("下载已取消")
             else:
-                progress.update_progress(100, "下载完成")
+                progress.update_progress(100, 100, "下载完成")
                 
         except Exception as e:
             self.logger.error(f"Download failed: {str(e)}")
@@ -406,3 +423,67 @@ class ObjectList(ttk.Frame):
         """设置OSS客户端"""
         self.oss_client = client
         self.load_objects() 
+    
+    def _upload_thread(self, local_file, object_name):
+        try:
+            # 创建进度窗口
+            progress_win = ProgressDialog(self, f"上传 {object_name}")
+            
+            def progress_callback(transferred, total):
+                progress_win.update_progress(transferred, total)
+            
+            # 构建完整的远程路径（考虑当前目录）
+            if self.current_path:
+                remote_path = f"{self.current_path}/{object_name}".lstrip('/')
+            else:
+                remote_path = object_name
+            
+            # 使用传输管理器上传
+            from utils.transfer_manager import TransferManager
+            manager = TransferManager()
+            manager.upload_file(
+                self.oss_client,
+                local_file,
+                remote_path,  # 使用完整路径
+                progress_callback=progress_callback
+            )
+            
+            progress_win.close()
+            self.load_objects(self.current_path)  # 刷新当前目录
+            messagebox.showinfo("成功", f"上传成功: {object_name}")
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"上传失败: {str(e)}")
+    
+    def start_upload(self):
+        """通过文件对话框选择文件上传"""
+        files = filedialog.askopenfilenames(
+            title="选择要上传的文件",
+            multiple=True
+        )
+        if files:
+            for file_path in files:
+                object_name = os.path.basename(file_path)
+                thread = threading.Thread(
+                    target=self._upload_thread,
+                    args=(file_path, object_name)
+                )
+                thread.daemon = True
+                thread.start()
+    
+    def on_drop(self, event):
+        """处理文件拖放"""
+        try:
+            files = self.tree.tk.splitlist(event.data)
+            for file_path in files:
+                if os.path.isfile(file_path):  # 只处理文件
+                    object_name = os.path.basename(file_path)
+                    thread = threading.Thread(
+                        target=self._upload_thread,
+                        args=(file_path, object_name)
+                    )
+                    thread.daemon = True
+                    thread.start()
+        except Exception as e:
+            self.logger.error(f"Drop failed: {str(e)}")
+            messagebox.showerror("错误", f"拖放上传失败: {str(e)}") 

@@ -151,9 +151,8 @@ class AliyunOSSClient(BaseOSSClient):
         try:
             upload = self.bucket.init_multipart_upload(object_name)
             return MultipartUpload(
-                upload_id=upload.upload_id,
                 object_name=object_name,
-                total_parts=0
+                upload_id=upload.upload_id
             )
         except OssError as e:
             raise OSSError(f"Failed to init multipart upload: {str(e)}")
@@ -239,7 +238,7 @@ class AliyunOSSClient(BaseOSSClient):
             file_size = object_stream.content_length
             downloaded = 0
             
-            # 流��读取和写入
+            # 流读取和写入
             while True:
                 chunk = object_stream.read(chunk_size)
                 if not chunk:
@@ -317,3 +316,27 @@ class AliyunOSSClient(BaseOSSClient):
             if 'NoSuchKey' in str(e):
                 raise ObjectNotFoundError(f"Object not found: {object_name}")
             raise OSSError(f"Failed to get object info: {str(e)}")
+
+    def upload_file(self, local_file: str, object_name: str, progress_callback=None) -> str:
+        """上传文件"""
+        try:
+            # 创建进度回调包装器
+            if progress_callback:
+                file_size = os.path.getsize(local_file)
+                
+                def callback(bytes_consumed, total_bytes):
+                    progress_callback(bytes_consumed)
+            else:
+                callback = None
+
+            # 执行上传
+            self.bucket.put_object_from_file(
+                object_name,
+                local_file,
+                progress_callback=callback
+            )
+            
+            return self.get_public_url(object_name)
+            
+        except Exception as e:
+            raise UploadError(f"Failed to upload file: {str(e)}")

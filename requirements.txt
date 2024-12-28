@@ -5,6 +5,7 @@ requests
 boto3
 oss2
 minio
+tkinterdnd2
 colorama
 pydantic
 pytest

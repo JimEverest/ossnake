@@ -9,7 +9,15 @@ from utils.config_manager import ConfigManager
 from .components.bucket_list import BucketList
 from .components.object_list import ObjectList
 
-class MainWindow(tk.Tk):
+try:
+    import tkinterdnd2 as tkdnd
+    DRAG_DROP_SUPPORTED = True
+except ImportError:
+    import tkinter as tk
+    DRAG_DROP_SUPPORTED = False
+    logging.warning("tkinterdnd2 not available, drag and drop will be disabled")
+
+class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
     def __init__(self):
         super().__init__()
         self.logger = logging.getLogger(__name__)
