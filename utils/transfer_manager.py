@@ -25,15 +25,15 @@ class TransferManager:
             file_size = os.path.getsize(local_file)
             transferred = 0  # 已传输字节数
             
-            def update_progress(chunk_size, *args):  # 添加 *args 来处理额外参数
+            def update_progress(chunk_size, *args):
                 """进度回调包装器，处理不同客户端的回调格式"""
                 nonlocal transferred
-                # 如果传入的是元组，取第一个值
-                if isinstance(chunk_size, tuple):
-                    chunk_size = chunk_size[0]
-                transferred += chunk_size
-                if progress_callback:
-                    progress_callback(transferred, file_size)
+                with self._lock:
+                    if isinstance(chunk_size, tuple):
+                        chunk_size = chunk_size[0]
+                    transferred += int(chunk_size)
+                    if progress_callback:
+                        progress_callback(transferred, file_size)
             
             # 小文件直接上传
             if file_size <= self.chunk_size:
@@ -48,26 +48,42 @@ class TransferManager:
             upload = client.init_multipart_upload(remote_path)
             self.logger.info(f"Started multipart upload: {upload.upload_id}")
             
-            # 计算分片数量
+            # 计算分片数量和大小
             total_parts = (file_size + self.chunk_size - 1) // self.chunk_size
             
-            # 先只实现单线程上传，确保基本功能正常
+            # 创建任务列表
+            tasks = []
             with open(local_file, 'rb') as f:
-                part_number = 1
-                
-                while True:
+                for part_number in range(1, total_parts + 1):
+                    # 计算当前分片大小
+                    chunk_start = (part_number - 1) * self.chunk_size
+                    f.seek(chunk_start)
                     chunk = f.read(self.chunk_size)
-                    if not chunk:
-                        break
                     
-                    # 上传分片
-                    etag = client.upload_part(upload, part_number, chunk)
-                    upload.parts.append((part_number, etag))
-                    
-                    # 更新进度
-                    update_progress(len(chunk))
-                    
-                    part_number += 1
+                    # 添加到任务列表
+                    tasks.append((part_number, chunk))
+            
+            # 使用线程池并发上传分片
+            completed_parts = []
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                def upload_part(args):
+                    part_number, data = args
+                    try:
+                        etag = client.upload_part(upload, part_number, data)
+                        update_progress(len(data))
+                        return part_number, etag
+                    except Exception as e:
+                        self.logger.error(f"Failed to upload part {part_number}: {e}")
+                        raise
+                
+                # 提交所有任务并等待完成
+                futures = [executor.submit(upload_part, task) for task in tasks]
+                for future in futures:
+                    part_number, etag = future.result()
+                    completed_parts.append((part_number, etag))
+            
+            # 按分片号排序
+            upload.parts = sorted(completed_parts, key=lambda x: x[0])
             
             # 完成上传
             return client.complete_multipart_upload(upload)
