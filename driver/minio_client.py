@@ -241,54 +241,57 @@ class MinioClient(BaseOSSClient):
             else:
                 raise UploadError(str(e))
 
-    def download_file(self, object_name: str, local_file: str, progress_callback: Optional[ProgressCallback] = None) -> None:
-        """从MinIO下载文件到本地"""
+    def download_file(self, object_name: str, local_path: str, progress_callback=None):
+        """下载文件"""
         try:
             # 确保目标目录存在
-            os.makedirs(os.path.dirname(os.path.abspath(local_file)), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(local_path)), exist_ok=True)
             
-            if progress_callback:
-                object_info = self.client.stat_object(self.config.bucket_name, object_name)
-                total_size = object_info.size
-                start_time = datetime.now()
-                bytes_transferred = 0
-
-                with open(local_file, 'wb') as f:
-                    def callback(data):
-                        nonlocal bytes_transferred
-                        bytes_transferred += len(data)
-                        elapsed = (datetime.now() - start_time).total_seconds()
-                        speed = bytes_transferred / elapsed if elapsed > 0 else 0
-                        progress_callback.on_progress(
-                            bytes_transferred,
-                            total_size,
-                            start_time,
-                            speed
-                        )
-                        return data
-
-                    self.client.fget_object(
-                        self.config.bucket_name,
-                        object_name,
-                        f,
-                        progress=callback
-                    )
-            else:
-                self.client.fget_object(
-                    self.config.bucket_name,
-                    object_name,
-                    local_file
-                )
+            # 获取文件大小
+            try:
+                stat = self.client.stat_object(self.config.bucket_name, object_name)
+                total_size = stat.size
+            except Exception as e:
+                self.logger.error(f"Failed to get object stats: {e}")
+                total_size = 0
             
-        except S3Error as e:
-            if 'NoSuchKey' in str(e):
-                raise ObjectNotFoundError(str(e))
-            elif 'NoSuchBucket' in str(e):
-                raise BucketNotFoundError(str(e))
-            elif 'AccessDenied' in str(e):
-                raise AuthenticationError(str(e))
+            # 创建进度回调包装器
+            if progress_callback and total_size > 0:
+                class ProgressWrapper:
+                    def __init__(self):
+                        self.transferred = 0
+                        
+                    def __call__(self, chunk_size):
+                        self.transferred += chunk_size
+                        progress_callback(self.transferred, total_size)
+                    
+                    def update(self, chunk_size):
+                        """MinIO需要这个方法"""
+                        self.__call__(chunk_size)
+                        
+                    def set_meta(self, **kwargs):
+                        """MinIO需要这个方法"""
+                        pass
+                
+                callback = ProgressWrapper()
             else:
-                raise DownloadError(str(e))
+                callback = None
+            
+            # 执行下载
+            self.client.fget_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name,
+                file_path=local_path,
+                progress=callback
+            )
+            
+        except Exception as e:
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)  # 清理未完成的文件
+                except:
+                    pass
+            raise OSSError(f"Failed to download file: {str(e)}")
 
     def delete_file(self, object_name: str) -> None:
         """删除文件
@@ -750,7 +753,7 @@ class MinioClient(BaseOSSClient):
     def rename_folder(self, source_prefix: str, target_prefix: str) -> None:
         """重命名文件夹（移动所有文件到新路径）
         Args:
-            source_prefix: 源文件夹路径（以/结���）
+            source_prefix: 源文件夹路径（以/结尾）
             target_prefix: 目标文件夹路径（以/结尾）
         """
         try:
@@ -815,3 +818,23 @@ class MinioClient(BaseOSSClient):
             if 'NoSuchKey' in str(e):
                 raise ObjectNotFoundError(f"Object not found: {object_name}")
             raise OSSError(f"Failed to get object size: {str(e)}")
+
+    def get_object_info(self, object_name: str) -> Dict:
+        """获取对象信息"""
+        try:
+            # 使用 stat_object 获取对象信息
+            stat = self.client.stat_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name
+            )
+            
+            return {
+                'size': stat.size,
+                'type': stat.content_type,
+                'last_modified': stat.last_modified,
+                'etag': stat.etag.strip('"')
+            }
+        except S3Error as e:
+            if 'NoSuchKey' in str(e):
+                raise ObjectNotFoundError(f"Object not found: {object_name}")
+            raise OSSError(f"Failed to get object info: {str(e)}")

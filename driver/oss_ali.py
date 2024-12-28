@@ -239,7 +239,7 @@ class AliyunOSSClient(BaseOSSClient):
             file_size = object_stream.content_length
             downloaded = 0
             
-            # 流式读取和写入
+            # 流��读取和写入
             while True:
                 chunk = object_stream.read(chunk_size)
                 if not chunk:
@@ -300,3 +300,20 @@ class AliyunOSSClient(BaseOSSClient):
         for obj in objects:
             new_object_name = obj['name'].replace(source_prefix, target_prefix, 1)
             self.rename_object(obj['name'], new_object_name)
+
+    def get_object_info(self, object_name: str) -> Dict:
+        """获取对象信息"""
+        try:
+            # 使用 head_object 获取对象元数据
+            object_meta = self.bucket.head_object(object_name)
+            
+            return {
+                'size': object_meta.content_length,
+                'type': object_meta.content_type,
+                'last_modified': object_meta.last_modified,
+                'etag': object_meta.etag.strip('"')
+            }
+        except Exception as e:
+            if 'NoSuchKey' in str(e):
+                raise ObjectNotFoundError(f"Object not found: {object_name}")
+            raise OSSError(f"Failed to get object info: {str(e)}")
