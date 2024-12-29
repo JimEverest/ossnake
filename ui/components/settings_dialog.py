@@ -3,12 +3,14 @@ from tkinter import ttk, messagebox
 import logging
 from utils.settings_manager import SettingsManager
 from utils.config_manager import ConfigManager
+from utils.proxy_manager import ProxyManager
 
 class SettingsDialog(tk.Toplevel):
     """设置对话框"""
     
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent = parent  # 保存父窗口引用
         self.title("设置")
         self.geometry("600x400")
         self.resizable(True, True)
@@ -523,14 +525,21 @@ class SettingsDialog(tk.Toplevel):
     def save_settings(self):
         """从UI保存设置"""
         try:
+            # 验证代理URL格式
+            if self.proxy_enabled_var.get():
+                http_proxy = ProxyManager.format_proxy_url(self.http_proxy_var.get())
+                https_proxy = ProxyManager.format_proxy_url(self.https_proxy_var.get())
+                if not (http_proxy or https_proxy):
+                    raise ValueError("启用代理时至少需要设置一个代理地址")
+            
             # 验证数值输入
             self._validate_numeric_settings()
             
             settings = {
                 "proxy": {
                     "enabled": self.proxy_enabled_var.get(),
-                    "http": self.http_proxy_var.get(),
-                    "https": self.https_proxy_var.get()
+                    "http": ProxyManager.format_proxy_url(self.http_proxy_var.get()),
+                    "https": ProxyManager.format_proxy_url(self.https_proxy_var.get())
                 },
                 "api": {
                     "enabled": self.api_enabled_var.get(),
@@ -568,11 +577,41 @@ class SettingsDialog(tk.Toplevel):
                 }
             }
             
-            return self.settings_manager.save_settings(settings)
+            # 保存设置
+            if self.settings_manager.save_settings(settings):
+                # 应用代理设置
+                self._apply_proxy_settings(settings["proxy"])
+                return True
+            return False
             
         except ValueError as e:
             messagebox.showerror("错误", f"输入验证失败: {str(e)}")
             return False
+    
+    def _apply_proxy_settings(self, proxy_settings: dict):
+        """应用代理设置"""
+        try:
+            from utils.proxy_manager import ProxyManager
+            proxy_manager = ProxyManager()
+            
+            if proxy_settings["enabled"]:
+                proxy_dict = {
+                    "http": proxy_settings["http"],
+                    "https": proxy_settings["https"]
+                }
+                proxy_manager.set_proxy(proxy_dict)
+            else:
+                proxy_manager.set_proxy(None)
+                
+            # 重新初始化所有OSS客户端
+            self.parent.config_manager.reload_clients()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to apply proxy settings: {e}")
+            messagebox.showerror("错误", f"应用代理设置失败: {str(e)}")
+            return False
+        
+        return True
     
     def _validate_numeric_settings(self):
         """验证数值设置项"""

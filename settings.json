@@ -1,6 +1,6 @@
 {
     "proxy": {
-        "enabled": true,
+        "enabled": false,
         "http": "http://127.0.0.1:33210",
         "https": "http://127.0.0.1:33210"
     },

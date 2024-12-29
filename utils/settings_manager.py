@@ -85,3 +85,15 @@ class SettingsManager:
                 else:
                     result[key] = value
         return result 
+    
+    def get_proxy_settings(self) -> dict:
+        """获取代理设置
+        Returns:
+            dict: 包含 http 和 https 代理设置的字典，如果代理未启用则返回 None
+        """
+        if self.settings["proxy"]["enabled"]:
+            return {
+                "http": self.settings["proxy"]["http"] if self.settings["proxy"]["http"] else None,
+                "https": self.settings["proxy"]["https"] if self.settings["proxy"]["https"] else None
+            }
+        return None 

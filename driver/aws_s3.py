@@ -32,64 +32,40 @@ class AWSS3Client(BaseOSSClient):
         super().__init__(config)  # 调用基类的初始化方法
         
         try:
-            # 配置代理
-            session_kwargs = {}
-            client_kwargs = {}
+            # 创建会话配置
+            session_config = {
+                'aws_access_key_id': config.access_key,
+                'aws_secret_access_key': config.secret_key,
+                'region_name': config.region
+            }
             
-            if hasattr(config, 'proxy') and config.proxy:
-                # 解析代理URL
-                proxy_info = urlparse(config.proxy)
-                
-                # 设置环境变量
-                os.environ['HTTP_PROXY'] = config.proxy
-                os.environ['HTTPS_PROXY'] = config.proxy
-                
-                # 配置代理
-                client_kwargs['proxies'] = {
-                    'http': config.proxy,
-                    'https': config.proxy
-                }
-                
-                # 配置验证
-                client_kwargs['verify'] = True  # 或者指定CA证书路径
-                
-                self.logger.info(f"Using proxy: {config.proxy}")
-            
-            # 创建会话
-            session = boto3.Session(
-                aws_access_key_id=config.access_key,
-                aws_secret_access_key=config.secret_key,
-                region_name=config.region,
-                **session_kwargs
-            )
+            self.session = boto3.Session(**session_config)
             
             # 创建客户端配置
             client_config = Config(
-                retries=dict(
-                    max_attempts=3
-                ),
-                proxies=client_kwargs.get('proxies'),
-                connect_timeout=30,
-                read_timeout=60
+                retries=dict(max_attempts=3)
             )
             
-            # 创建S3客户端
-            self.client = session.client(
+            # 设置代理配置
+            if self.proxy_settings:
+                client_config = Config(
+                    proxies={
+                        'http': self.proxy_settings.get('http'),
+                        'https': self.proxy_settings.get('https')
+                    },
+                    retries=dict(max_attempts=3)
+                )
+            
+            self.client = self.session.client(
                 's3',
-                config=client_config,
-                verify=client_kwargs.get('verify', True),
-                endpoint_url=config.endpoint if hasattr(config, 'endpoint') else None
+                endpoint_url=config.endpoint,
+                config=client_config
             )
-            
-            # 验证连接
-            try:
-                self.client.list_buckets()
-                self.logger.info("Successfully connected to AWS S3")
-            except Exception as e:
-                raise ConnectionError(f"Failed to connect to AWS S3: {str(e)}")
+            self.connected = True
             
         except Exception as e:
-            raise ConnectionError(f"Failed to initialize AWS S3 client: {str(e)}")
+            self.logger.error(f"Failed to initialize AWS S3 client: {str(e)}")
+            raise ConnectionError(f"Failed to connect to AWS S3: {str(e)}")
 
     def _init_client(self) -> None:
         """初始化AWS S3客户端"""

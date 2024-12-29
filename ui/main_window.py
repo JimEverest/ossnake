@@ -24,7 +24,9 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
         
         # 配置管理
         self.config_manager = ConfigManager()
-        self.oss_clients = self.config_manager.load_clients()
+        self.config_manager.main_window = self
+        # 不需要再次加载客户端，因为ConfigManager初始化时已经加载了
+        self.oss_clients = self.config_manager.oss_clients
         
         # 基本窗口设置
         self.title("OSS Explorer")
@@ -39,7 +41,22 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+        # 加载并应用代理设置
+        self._load_proxy_settings()
+        
         self.logger.info("Main window initialized")
+    
+    def _load_proxy_settings(self):
+        """加载并应用代理设置"""
+        from utils.settings_manager import SettingsManager
+        from utils.proxy_manager import ProxyManager
+        
+        settings_manager = SettingsManager()
+        proxy_manager = ProxyManager()
+        
+        # 获取并应用代理设置
+        proxy_settings = settings_manager.get_proxy_settings()
+        proxy_manager.set_proxy(proxy_settings)
     
     def create_menu(self):
         """创建菜单栏"""
@@ -183,3 +200,19 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
         from .components.settings_dialog import SettingsDialog
         dialog = SettingsDialog(self)
         dialog.wait_window()
+    
+    def update_oss_clients(self, new_clients):
+        """更新OSS客户端列表"""
+        self.oss_clients = new_clients
+        
+        # 更新下拉列表的值
+        if hasattr(self, 'source_combo'):
+            current = self.source_var.get()
+            self.source_combo['values'] = list(new_clients.keys())
+            
+            # 如果当前选中的源仍然存在，保持选中
+            if current in new_clients:
+                self.source_combo.set(current)
+            # 否则选择第一个可用的源
+            elif new_clients:
+                self.source_combo.set(list(new_clients.keys())[0])

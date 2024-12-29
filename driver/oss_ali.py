@@ -25,44 +25,41 @@ class AliyunOSSClient(BaseOSSClient):
     def __init__(self, config: OSSConfig):
         """初始化阿里云OSS客户端"""
         super().__init__(config)  # 调用基类的初始化方法
-        self._init_client()
+        try:
+            # 创建认证对象
+            auth = oss2.Auth(config.access_key, config.secret_key)
+            
+            # 设置代理
+            if self.proxy_settings:
+                http_proxy = self.proxy_settings.get('http')
+                https_proxy = self.proxy_settings.get('https')
+                if http_proxy:
+                    os.environ['HTTP_PROXY'] = http_proxy
+                if https_proxy:
+                    os.environ['HTTPS_PROXY'] = https_proxy
+            
+            # 创建Bucket对象
+            self.client = oss2.Bucket(
+                auth,
+                config.endpoint,
+                config.bucket_name
+            )
+            self.bucket = self.client  # 为了兼容性保留bucket引用
+            self.connected = True
+            self.logger.info(f"Aliyun OSS client initialized with endpoint: {config.endpoint}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Aliyun OSS client: {str(e)}")
+            raise ConnectionError(f"Failed to connect to Aliyun OSS: {str(e)}")
 
     def _init_client(self) -> None:
-        """初始化OSS客户端"""
-        try:
-            # 配置代理
-            if hasattr(self.config, 'proxy') and self.config.proxy:
-                proxy_info = urlparse(self.config.proxy)
-                # 创建代理配置
-                proxies = {
-                    'http': self.config.proxy,
-                    'https': self.config.proxy
-                }
-                # 设置环境变量
-                os.environ['HTTP_PROXY'] = self.config.proxy
-                os.environ['HTTPS_PROXY'] = self.config.proxy
-                self.logger.info(f"Using proxy: {self.config.proxy}")
-            
-            # 创建认证对象
-            self.auth = Auth(self.config.access_key, self.config.secret_key)
-            
-            # 创建Bucket对象，添加代理配置
-            self.bucket = Bucket(
-                self.auth,
-                self.config.endpoint,
-                self.config.bucket_name,
-                connect_timeout=30,
-                app_name='ossnake',
-                enable_crc=True,
-                proxies=proxies if 'proxies' in locals() else None
-            )
-        except Exception as e:
-            raise ConnectionError(f"Failed to initialize Aliyun OSS client: {str(e)}")
+        """已在__init__中实现，这里只是为了满足基类要求"""
+        pass  # 实际的初始化在__init__中完成
 
     def _upload_file(self, local_file: str, object_name: str, progress_callback: Optional[ProgressCallback] = None) -> str:
         """实际的文件上传实现"""
         try:
-            self.bucket.put_object_from_file(object_name, local_file, progress_callback=progress_callback)
+            self.client.put_object_from_file(object_name, local_file, progress_callback=progress_callback)
             return self.get_public_url(object_name)
         except OssError as e:
             raise UploadError(f"Failed to upload file {local_file}: {str(e)}")

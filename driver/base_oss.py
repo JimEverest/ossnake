@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import logging
+from utils.settings_manager import SettingsManager
 
 def with_timeout(timeout_seconds=30):
     """超时装饰器"""
@@ -31,6 +32,11 @@ class BaseOSSClient(ABC):
         self.config = config
         self.connected = False
         self.logger = logging.getLogger(__name__)
+        
+        # 获取当前代理设置
+        settings_manager = SettingsManager()
+        self.proxy_settings = settings_manager.get_proxy_settings()
+        
         try:
             self._init_client_with_timeout()
             self.connected = True

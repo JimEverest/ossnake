@@ -46,30 +46,27 @@ class MinioClient(BaseOSSClient):
         
         try:
             # 配置代理
-            if hasattr(config, 'proxy') and config.proxy:
-                proxy_url = config.proxy
-                logger.info(f"Initializing MinIO client with proxy: {proxy_url}")
+            http_client_args = {
+                'timeout': urllib3.Timeout.DEFAULT_TIMEOUT,
+                'maxsize': 10,
+                'retries': urllib3.Retry(
+                    total=3,
+                    backoff_factor=0.2,
+                    status_forcelist=[500, 502, 503, 504]
+                )
+            }
+            
+            # 根据是否有代理使用不同的HTTP客户端
+            if self.proxy_settings and (self.proxy_settings.get('http') or self.proxy_settings.get('https')):
+                proxy_url = self.proxy_settings.get('https') or self.proxy_settings.get('http')
                 http_client = urllib3.ProxyManager(
                     proxy_url,
-                    timeout=urllib3.Timeout(connect=5.0, read=60.0),
-                    maxsize=8,
-                    retries=urllib3.Retry(
-                        total=2,
-                        backoff_factor=0.5,
-                        status_forcelist=[500, 502, 503, 504]
-                    )
+                    **http_client_args
                 )
+                self.logger.info(f"Using proxy: {proxy_url}")
             else:
-                http_client = urllib3.PoolManager(
-                    timeout=urllib3.Timeout(connect=5.0, read=900.0),
-                    maxsize=8,
-                    retries=urllib3.Retry(
-                        total=3,
-                        backoff_factor=0.2,
-                        status_forcelist=[500, 502, 503, 504]
-                    )
-                )
-
+                http_client = urllib3.PoolManager(**http_client_args)
+            
             # 创建MinIO客户端
             self.client = Minio(
                 endpoint=config.endpoint,
@@ -78,16 +75,12 @@ class MinioClient(BaseOSSClient):
                 secure=config.secure,
                 http_client=http_client
             )
-            
-            # 验证连接和代理
-            try:
-                self.client.list_buckets()
-                logger.info("Successfully connected to MinIO server")
-            except Exception as e:
-                raise ConnectionError(f"Failed to connect to MinIO server: {str(e)}")
+            self.connected = True
+            self.logger.info(f"MinIO client initialized with endpoint: {config.endpoint}")
             
         except Exception as e:
-            raise ConnectionError(f"Failed to initialize MinIO client: {str(e)}")
+            self.logger.error(f"Failed to initialize MinIO client: {str(e)}")
+            raise ConnectionError(f"Failed to connect to MinIO: {str(e)}")
 
     def _init_client(self) -> None:
         """初始化MinIO客户端"""

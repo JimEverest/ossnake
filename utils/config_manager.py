@@ -19,6 +19,8 @@ class ConfigManager:
         self.logger = logging.getLogger(__name__)
         if not os.path.exists(self.CONFIG_FILE):
             self.save_config({})
+        # 初始化时就加载客户端
+        self.oss_clients = self.load_clients()
     
     def _init_client_with_timeout(self, client_class, config) -> tuple:
         """在超时限制内初始化客户端"""
@@ -107,5 +109,24 @@ class ConfigManager:
         if name in config_data.get("oss_clients", {}):
             del config_data["oss_clients"][name]
             self.save_config(config_data)
+    
+    def reload_clients(self):
+        """重新加载所有OSS客户端"""
+        try:
+            # 重新加载客户端
+            new_clients = self.load_clients()
+            
+            # 如果成功加载了新的客户端，更新当前的客户端列表
+            self.oss_clients = new_clients
+            
+            # 如果有主窗口引用，更新UI
+            if hasattr(self, 'main_window'):
+                self.main_window.update_oss_clients(self.oss_clients)
+                
+            self.logger.info("Successfully reloaded OSS clients")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to reload clients: {e}")
+            raise
     
     # 添加编辑功能
