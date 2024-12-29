@@ -108,10 +108,11 @@ class ObjectList(ttk.Frame):
         # 创建右键菜单
         self.context_menu = tk.Menu(self, tearoff=0)
         self.context_menu.add_command(label="下载", command=self.download_selected)
+        self.context_menu.add_command(label="重命名", command=self.rename_selected)  # 添加重命名选项
         self.context_menu.add_command(label="删除", command=self.delete_selected)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="复制路径", command=self.copy_path)
-        self.context_menu.add_command(label="刷新", command=self.load_objects)  # 添加刷新选项
+        self.context_menu.add_command(label="刷新", command=self.load_objects)
         
         # 绑定右键菜单
         self.tree.bind('<Button-3>', self.show_context_menu)
@@ -580,3 +581,113 @@ class ObjectList(ttk.Frame):
         except Exception as e:
             self.logger.error(f"Drop failed: {str(e)}")
             messagebox.showerror("错误", f"拖放上传失败: {str(e)}") 
+    
+    def rename_selected(self):
+        """重命名选中的对象"""
+        selection = self.tree.selection()
+        if not selection or len(selection) != 1:  # 只允许单个重命名
+            return
+            
+        item = self.tree.item(selection[0])
+        values = item['values']
+        if not values or values[1] == '..':  # 排除返回上级目录项
+            return
+            
+        old_name = values[1]
+        is_dir = values[3] == '目录'
+        old_path = f"{self.current_path}/{old_name}".lstrip('/')
+        
+        # 弹出重命名对话框
+        new_name = self.show_rename_dialog(old_name)
+        if not new_name or new_name == old_name:
+            return
+            
+        # 构建新路径
+        new_path = f"{self.current_path}/{new_name}".lstrip('/')
+        
+        try:
+            if is_dir:
+                # 重命名目录（移动所有文件）
+                self.oss_client.rename_folder(old_path, new_path)
+            else:
+                # 重命名文件（复制后删除）
+                self.oss_client.rename_object(old_path, new_path)
+            
+            # 刷新列表
+            self.load_objects(self.current_path)
+            
+            # 显示成功提示
+            Toast(self, f"重命名成功: {old_name} → {new_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to rename {old_path} to {new_path}: {str(e)}")
+            messagebox.showerror("错误", f"重命名失败: {str(e)}")
+    
+    def show_rename_dialog(self, old_name):
+        """显示重命名对话框"""
+        dialog = tk.Toplevel(self)
+        dialog.title("重命名")
+        dialog.geometry("500x150")  # 增加宽度和高度
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        # 创建主框架
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建输入区域
+        input_frame = ttk.Frame(main_frame)
+        input_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 标签和输入框
+        ttk.Label(input_frame, text="新名称:").pack(anchor=tk.W, pady=(0, 5))
+        entry = ttk.Entry(input_frame, width=60)
+        entry.pack(fill=tk.X, pady=(0, 20))
+        entry.insert(0, old_name)
+        
+        # 智能选择文件名部分
+        if '.' in old_name:
+            name_part = old_name.rpartition('.')[0]  # 获取最后一个点之前的部分
+            entry.select_range(0, len(name_part))
+        else:
+            entry.select_range(0, len(old_name))
+        
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        result = [None]
+        
+        def on_ok():
+            result[0] = entry.get().strip()
+            dialog.destroy()
+            
+        def on_cancel():
+            dialog.destroy()
+        
+        # 按钮
+        cancel_btn = ttk.Button(button_frame, text="取消", command=on_cancel, width=10)
+        ok_btn = ttk.Button(button_frame, text="确定", command=on_ok, width=10)
+        
+        # 从右向左布局按钮
+        ok_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        cancel_btn.pack(side=tk.RIGHT)
+        
+        # 绑定回车键和ESC键
+        entry.bind('<Return>', lambda e: on_ok())
+        entry.bind('<Escape>', lambda e: on_cancel())
+        dialog.bind('<Escape>', lambda e: on_cancel())
+        
+        # 设置焦点
+        entry.focus_set()
+        
+        # 等待窗口关闭
+        dialog.wait_window()
+        return result[0] 
