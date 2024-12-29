@@ -29,7 +29,17 @@ class TransferManager:
             if file_size <= self.chunk_size:
                 if progress_callback:
                     progress_callback(0, file_size)  # 初始进度
-                result = client.upload_file(local_file, remote_path, progress_callback)
+                    
+                    # 创建小文件上传的进度回调包装器
+                    def small_file_callback(chunk_size):
+                        nonlocal transferred
+                        transferred += chunk_size
+                        progress_callback(transferred, file_size)
+                        
+                    result = client.upload_file(local_file, remote_path, small_file_callback)
+                else:
+                    result = client.upload_file(local_file, remote_path, None)
+                    
                 if progress_callback:
                     progress_callback(file_size, file_size)  # 完成进度
                 return result

@@ -8,6 +8,7 @@ from io import BytesIO
 from tkinter import filedialog
 from .progress_dialog import ProgressDialog
 import threading
+from .toast import Toast  # 添加导入
 
 # 尝试导入 tkinterdnd2，如果不可用则禁用拖放功能
 try:
@@ -467,7 +468,9 @@ class ObjectList(ttk.Frame):
             
             progress_win.close()
             self.load_objects(self.current_path)  # 刷新当前目录
-            messagebox.showinfo("成功", f"上传成功: {object_name}")
+            
+            # 使用 Toast 替代 messagebox
+            Toast(self, f"上传成功: {object_name}")
             
         except Exception as e:
             self.logger.error(f"Upload failed: {str(e)}")
