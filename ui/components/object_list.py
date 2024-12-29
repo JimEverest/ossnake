@@ -108,10 +108,11 @@ class ObjectList(ttk.Frame):
         # 创建右键菜单
         self.context_menu = tk.Menu(self, tearoff=0)
         self.context_menu.add_command(label="下载", command=self.download_selected)
-        self.context_menu.add_command(label="重命名", command=self.rename_selected)  # 添加重命名选项
+        self.context_menu.add_command(label="重命名", command=self.rename_selected)
         self.context_menu.add_command(label="删除", command=self.delete_selected)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="复制路径", command=self.copy_path)
+        self.context_menu.add_command(label="复制URL", command=self.copy_url)
         self.context_menu.add_command(label="刷新", command=self.load_objects)
         
         # 绑定右键菜单
@@ -691,3 +692,34 @@ class ObjectList(ttk.Frame):
         # 等待窗口关闭
         dialog.wait_window()
         return result[0] 
+    
+    def copy_url(self):
+        """复制对象的公共URL"""
+        selection = self.tree.selection()
+        if not selection:
+            return
+            
+        # 只处理第一个选中项
+        item = self.tree.item(selection[0])
+        values = item['values']
+        if not values or values[1] == '..' or values[3] == '目录':
+            return
+            
+        try:
+            # 获取完整路径
+            name = values[1]
+            full_path = f"{self.current_path}/{name}".lstrip('/')
+            
+            # 获取公共URL
+            url = self.oss_client.get_public_url(full_path)
+            
+            # 复制到剪贴板
+            self.clipboard_clear()
+            self.clipboard_append(url)
+            
+            # 显示提示
+            Toast(self, f"已复制URL: {url}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get URL for {full_path}: {str(e)}")
+            messagebox.showerror("错误", f"获取URL失败: {str(e)}") 
