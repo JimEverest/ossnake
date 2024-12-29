@@ -340,3 +340,29 @@ class AliyunOSSClient(BaseOSSClient):
             
         except Exception as e:
             raise UploadError(f"Failed to upload file: {str(e)}")
+
+    def put_object(self, object_name: str, data: bytes, content_type: str = None) -> str:
+        """直接上传数据
+        Args:
+            object_name: 对象名称
+            data: 要上传的数据
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
+        try:
+            self.logger.debug(f"Starting put_object to {object_name}")
+            
+            # 使用阿里云 SDK 的 put_object 方法
+            self.bucket.put_object(
+                object_name,
+                data,
+                headers={'Content-Type': content_type} if content_type else None
+            )
+            
+            self.logger.debug(f"Put object completed: {object_name}")
+            return self.get_public_url(object_name)
+            
+        except OssError as e:
+            self.logger.error(f"Put object failed: {str(e)}")
+            raise UploadError(f"Upload failed: {str(e)}")

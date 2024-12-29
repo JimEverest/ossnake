@@ -111,6 +111,9 @@ class ObjectList(ttk.Frame):
         self.context_menu.add_command(label="重命名", command=self.rename_selected)
         self.context_menu.add_command(label="删除", command=self.delete_selected)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="新建文件夹", command=self.create_folder)
+        self.context_menu.add_command(label="新建文本文件", command=self.create_text_file)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="复制路径", command=self.copy_path)
         self.context_menu.add_command(label="复制URL", command=self.copy_url)
         self.context_menu.add_command(label="刷新", command=self.load_objects)
@@ -142,35 +145,32 @@ class ObjectList(ttk.Frame):
             objects = self.oss_client.list_objects(prefix=path)
             
             # 用分别存储目录和文件
-            directories = []
+            directories = set()  # 使用集合避免重复
             files = []
             
             # 首先识别所有目录和文件
             for obj in objects:
                 name = obj['name']
-                if path and name.startswith(path):
-                    name = name[len(path):].lstrip('/')
                 
-                if not name:  # 跳过空名称
+                # 跳过当前目录
+                if name == path or (path and not name.startswith(path + '/')):
                     continue
                 
-                # 处理目录结构
-                parts = name.split('/')
-                if len(parts) > 1:
-                    # 这是一个子目录中的文件
-                    dir_name = parts[0]
-                    if dir_name not in [d[0] for d in directories]:
-                        directories.append((dir_name, '', '目录', ''))
-                    continue
+                # 获取相对路径
+                relative_path = name[len(path):].lstrip('/') if path else name
                 
-                # 处理直接文件和目录
-                if obj['type'] == 'directory':
-                    directories.append((name, '', '目录', ''))
-                else:
+                # 处理目录
+                if obj['type'] == 'directory' or name.endswith('/'):
+                    # 只取第一级目录
+                    dir_name = relative_path.split('/')[0]
+                    if dir_name:
+                        directories.add(dir_name)
+                # 处理文件
+                elif '/' not in relative_path:  # 只显示当前目录的文件
                     files.append((
-                        name,
+                        relative_path,
                         self.format_size(obj.get('size', 0)),
-                        self.get_file_type(name),
+                        self.get_file_type(relative_path),
                         obj.get('last_modified', '')
                     ))
             
@@ -185,13 +185,13 @@ class ObjectList(ttk.Frame):
                 ), tags=('parent',))
             
             # 添加目录（排序后）
-            for dir_info in sorted(directories, key=lambda x: x[0].lower()):
+            for dir_name in sorted(directories):
                 self.tree.insert('', 'end', values=(
                     self.icons['folder'],
-                    dir_info[0],
-                    dir_info[1],
-                    dir_info[2],
-                    dir_info[3]
+                    dir_name,
+                    '',
+                    '目录',
+                    ''
                 ), tags=('directory',))
             
             # 添加文件（排序后）
@@ -202,7 +202,7 @@ class ObjectList(ttk.Frame):
                     file_info[1],
                     file_info[2],
                     file_info[3]
-                ), tags=('file',))
+                ))
             
             self.logger.info(f"Loaded objects at path: '{path}'")
             
@@ -217,12 +217,15 @@ class ObjectList(ttk.Frame):
         if not values:
             return
             
-        name = values[1]
+        name = values[1]  # 获取原始名称，不做任何转换
         if name == '..':  # 返回上级目录
             parent_path = '/'.join(self.current_path.split('/')[:-1])
             self.load_objects(parent_path)
         elif 'directory' in self.tree.item(item)['tags']:  # 进入目录
+            # 保持原始名称，不要做任何数值转换
             new_path = f"{self.current_path}/{name}".lstrip('/')
+            # 记录日志以便调试
+            self.logger.debug(f"Entering directory: {name} -> {new_path}")
             self.load_objects(new_path)
     
     def show_context_menu(self, event):
@@ -723,3 +726,193 @@ class ObjectList(ttk.Frame):
         except Exception as e:
             self.logger.error(f"Failed to get URL for {full_path}: {str(e)}")
             messagebox.showerror("错误", f"获取URL失败: {str(e)}") 
+    
+    def create_folder(self):
+        """创建新文件夹"""
+        dialog = tk.Toplevel(self)
+        dialog.title("新建文件夹")
+        dialog.geometry("400x120")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        # 创建主框架
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 标签和输入框
+        ttk.Label(main_frame, text="文件夹名称:").pack(anchor=tk.W, pady=(0, 5))
+        entry = ttk.Entry(main_frame, width=40)
+        entry.pack(fill=tk.X, pady=(0, 20))
+        entry.insert(0, "新建文件夹")
+        entry.select_range(0, len("新建文件夹"))
+        
+        result = [None]
+        
+        def on_ok():
+            folder_name = entry.get().strip()
+            if folder_name:
+                result[0] = folder_name
+                dialog.destroy()
+            
+        def on_cancel():
+            dialog.destroy()
+        
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+        
+        # 按钮
+        cancel_btn = ttk.Button(button_frame, text="取消", command=on_cancel, width=10)
+        ok_btn = ttk.Button(button_frame, text="确定", command=on_ok, width=10)
+        
+        # 从右向左布局按钮
+        ok_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        cancel_btn.pack(side=tk.RIGHT)
+        
+        # 绑定回车键和ESC键
+        entry.bind('<Return>', lambda e: on_ok())
+        entry.bind('<Escape>', lambda e: on_cancel())
+        dialog.bind('<Escape>', lambda e: on_cancel())
+        
+        # 设置焦点
+        entry.focus_set()
+        
+        # 等待窗口关闭
+        dialog.wait_window()
+        
+        # 创建文件夹
+        folder_name = result[0]
+        if folder_name:
+            try:
+                # 构建完整路径
+                full_path = f"{self.current_path}/{folder_name}".lstrip('/')
+                if full_path[-1] != '/':
+                    full_path += '/'
+                    
+                # 创建空对象作为文件夹标记
+                self.oss_client.create_folder(full_path)
+                
+                # 刷新列表
+                self.load_objects(self.current_path)
+                
+                # 显示成功提示
+                Toast(self, f"已创建文件夹: {folder_name}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to create folder {folder_name}: {str(e)}")
+                messagebox.showerror("错误", f"创建文件夹失败: {str(e)}") 
+    
+    def create_text_file(self):
+        """创建新文本文件"""
+        dialog = tk.Toplevel(self)
+        dialog.title("新建文本文件")
+        dialog.geometry("500x400")  # 更大的窗口以容纳文本编辑区
+        dialog.resizable(True, True)  # 允许调整大小
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # 居中显示
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - dialog.winfo_width()) // 2
+        y = (dialog.winfo_screenheight() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        # 创建主框架
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 文件名输入区域
+        name_frame = ttk.Frame(main_frame)
+        name_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(name_frame, text="文件名:").pack(side=tk.LEFT)
+        name_entry = ttk.Entry(name_frame, width=40)
+        name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        name_entry.insert(0, "新建文本文档.txt")
+        name_entry.select_range(0, len("新建文本文档"))
+        
+        # 创建文本编辑区
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        text_area = tk.Text(text_frame, wrap=tk.WORD, width=50, height=15)
+        text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_area.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        text_area.configure(yscrollcommand=scrollbar.set)
+        
+        result = {"name": None, "content": None}
+        
+        def on_ok():
+            file_name = name_entry.get().strip()
+            if not file_name:
+                messagebox.showwarning("警告", "请输入文件名")
+                return
+                
+            # 确保文件名以.txt结尾
+            if not file_name.lower().endswith('.txt'):
+                file_name += '.txt'
+                
+            result["name"] = file_name
+            result["content"] = text_area.get("1.0", tk.END)
+            dialog.destroy()
+            
+        def on_cancel():
+            dialog.destroy()
+        
+        # 按钮框架
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # 按钮
+        cancel_btn = ttk.Button(button_frame, text="取消", command=on_cancel, width=10)
+        ok_btn = ttk.Button(button_frame, text="确定", command=on_ok, width=10)
+        
+        # 从右向左布局按钮
+        ok_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        cancel_btn.pack(side=tk.RIGHT)
+        
+        # 绑定快捷键
+        dialog.bind('<Escape>', lambda e: on_cancel())
+        dialog.bind('<Control-Return>', lambda e: on_ok())  # Ctrl+Enter 保存
+        
+        # 设置焦点
+        name_entry.focus_set()
+        
+        # 等待窗口关闭
+        dialog.wait_window()
+        
+        # 创建文件
+        if result["name"] and result["content"] is not None:
+            try:
+                # 构建完整路径
+                full_path = f"{self.current_path}/{result['name']}".lstrip('/')
+                
+                # 将文本内容转换为字节流
+                content_bytes = result["content"].encode('utf-8')
+                
+                # 直接上传内容
+                self.oss_client.put_object(
+                    full_path,
+                    content_bytes,
+                    content_type='text/plain'
+                )
+                
+                # 刷新列表
+                self.load_objects(self.current_path)
+                
+                # 显示成功提示
+                Toast(self, f"已创建文件: {result['name']}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to create text file {result['name']}: {str(e)}")
+                messagebox.showerror("错误", f"创建文件失败: {str(e)}") 

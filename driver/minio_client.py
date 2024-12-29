@@ -12,6 +12,7 @@ import urllib3
 import logging
 import shutil
 import traceback
+import json
 
 from .types import OSSConfig, ProgressCallback, MultipartUpload
 from .base_oss import BaseOSSClient
@@ -323,16 +324,19 @@ class MinioClient(BaseOSSClient):
             )
             
             for item in items:
+                # 保持原始名称，不做任何转换
+                name = str(item.object_name)  # 确保是字符串类型
+                
                 if item.is_dir:
                     objects.append({
-                        'name': item.object_name,
-                        'type': 'folder',
+                        'name': name,  # 保持原始名称
+                        'type': 'directory',
                         'size': 0,
                         'last_modified': None
                     })
                 else:
                     objects.append({
-                        'name': item.object_name,
+                        'name': name,  # 保持原始名称
                         'type': 'file',
                         'size': item.size,
                         'last_modified': item.last_modified,
@@ -373,24 +377,35 @@ class MinioClient(BaseOSSClient):
         scheme = 'https' if self.config.secure else 'http'
         return f"{scheme}://{self.config.endpoint}/{self.config.bucket_name}/{object_name}"
 
-    def create_folder(self, folder_name: str) -> None:
-        """创建文件夹"""
-        if not folder_name.endswith('/'):
-            folder_name += '/'
+    def create_folder(self, folder_path: str) -> None:
+        """创建文件夹（在对象存储中创建一个空对象）
+        Args:
+            folder_path: 文件夹路径（以/结尾）
+        """
         try:
+            self.logger.debug(f"Creating folder: {folder_path}")
+            
+            # 确保路径以/结尾
+            if not folder_path.endswith('/'):
+                folder_path += '/'
+            
+            # 创建一个空的字节流作为文件夹标记
+            empty_data = b''
+            
+            # 上传空对象
             self.client.put_object(
-                self.config.bucket_name,
-                folder_name,
-                io.BytesIO(b''),
-                0
+                bucket_name=self.config.bucket_name,
+                object_name=folder_path,  # 文件夹路径必须以/结尾
+                data=BytesIO(empty_data),
+                length=0,
+                content_type='application/x-directory'  # 设置特殊的内容类型
             )
+            
+            self.logger.debug(f"Folder created: {folder_path}")
+            
         except S3Error as e:
-            if 'NoSuchBucket' in str(e):
-                raise BucketNotFoundError(str(e))
-            elif 'AccessDenied' in str(e):
-                raise AuthenticationError(str(e))
-            else:
-                raise OSSError(f"Failed to create folder: {str(e)}")
+            self.logger.error(f"Failed to create folder: {str(e)}")
+            raise OSSError(f"Failed to create folder: {str(e)}")
 
     def move_object(self, source: str, destination: str) -> None:
         """移动/重命名对象"""
@@ -817,7 +832,7 @@ class MinioClient(BaseOSSClient):
             raise OSSError(f"Failed to rename folder: {str(e)}")
 
     def object_exists(self, object_name: str) -> bool:
-        """��对象是否存在"""
+        """对象是否存在"""
         try:
             self.client.stat_object(
                 bucket_name=self.config.bucket_name,
@@ -865,3 +880,31 @@ class MinioClient(BaseOSSClient):
             if 'NoSuchKey' in str(e):
                 raise ObjectNotFoundError(f"Object not found: {object_name}")
             raise OSSError(f"Failed to get object info: {str(e)}")
+
+    def put_object(self, object_name: str, data: bytes, content_type: str = None) -> str:
+        """直接上传数据
+        Args:
+            object_name: 对象名称
+            data: 要上传的数据
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
+        try:
+            self.logger.debug(f"Starting put_object to {object_name}")
+            
+            # 使用 MinIO SDK 的 put_object 方法
+            self.client.put_object(
+                bucket_name=self.config.bucket_name,
+                object_name=object_name,
+                data=BytesIO(data),
+                length=len(data),
+                content_type=content_type or 'application/octet-stream'
+            )
+            
+            self.logger.debug(f"Put object completed: {object_name}")
+            return self.get_public_url(object_name)
+            
+        except S3Error as e:
+            self.logger.error(f"Put object failed: {str(e)}")
+            raise UploadError(f"Upload failed: {str(e)}")

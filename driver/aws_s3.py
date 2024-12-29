@@ -243,33 +243,57 @@ class AWSS3Client(BaseOSSClient):
             self.logger.error(f"Failed to upload file {local_file}: {str(e)}")
             raise UploadError(f"Failed to upload file {local_file}: {str(e)}")
 
-    def upload_stream(self, input_stream, object_name: str, content_type: str = None) -> str:
-        """流式上传文件
+    def upload_stream(
+        self,
+        stream: BinaryIO,
+        object_name: str,
+        content_type: Optional[str] = None
+    ) -> str:
+        """从流中上传数据到S3
         Args:
-            input_stream: 输入流（需要支持read方法）
+            stream: 数据流
             object_name: 对象名称
             content_type: 内容类型
         Returns:
             str: 对象的URL
         """
         try:
-            # 准备上传参数
-            extra_args = {}
-            if content_type:
-                extra_args['ContentType'] = content_type
+            self.logger.debug(f"Starting stream upload to {object_name}")
             
-            # 使用 upload_fileobj 进行流式上传
+            # 确保流指针在开始位置
+            if hasattr(stream, 'seek'):
+                stream.seek(0)
+            
+            # 上传文件
             self.client.upload_fileobj(
-                input_stream,
+                stream,
                 self.config.bucket_name,
                 object_name,
-                ExtraArgs=extra_args
+                ExtraArgs={
+                    'ContentType': content_type or 'application/octet-stream'
+                }
             )
             
+            self.logger.debug(f"Stream upload completed: {object_name}")
             return self.get_public_url(object_name)
             
+        except ClientError as e:
+            error = e.response['Error']
+            error_code = error['Code']
+            error_msg = error['Message']
+            
+            self.logger.error(f"Stream upload failed: {error_code} - {error_msg}")
+            
+            if error_code in ('AccessDenied', 'InvalidAccessKeyId', 'SignatureDoesNotMatch'):
+                raise AuthenticationError(error_msg)
+            elif error_code == 'NoSuchBucket':
+                raise BucketNotFoundError(error_msg)
+            else:
+                raise UploadError(f"Upload failed: {error_msg}")
+                
         except Exception as e:
-            raise OSSError(f"Failed to upload stream: {str(e)}")
+            self.logger.error(f"Unexpected error during stream upload: {str(e)}")
+            raise UploadError(f"Upload failed: {str(e)}")
 
     def download_file(self, remote_path: str, local_path: str, progress_callback=None):
         """下载文件"""
@@ -541,7 +565,7 @@ class AWSS3Client(BaseOSSClient):
             source_key: 源对象路径
             target_key: 目标对象路径
         Returns:
-            str: 新对象��URL
+            str: 新对象的URL
         """
         try:
             # 1. 复制对象
@@ -680,3 +704,38 @@ class AWSS3Client(BaseOSSClient):
             if e.response['Error']['Code'] == '404':
                 raise ObjectNotFoundError(f"Object not found: {object_name}")
             raise OSSError(f"Failed to get object info: {str(e)}") 
+
+    def put_object(self, object_name: str, data: bytes, content_type: str = None) -> str:
+        """直接上传数据
+        Args:
+            object_name: 对象名称
+            data: 要上传的数据
+            content_type: 内容类型
+        Returns:
+            str: 对象的URL
+        """
+        try:
+            self.logger.debug(f"Starting put_object to {object_name}")
+            
+            # 上传数据
+            self.client.put_object(
+                Bucket=self.config.bucket_name,
+                Key=object_name,
+                Body=data,
+                ContentType=content_type or 'application/octet-stream'
+            )
+            
+            self.logger.debug(f"Put object completed: {object_name}")
+            return self.get_public_url(object_name)
+            
+        except ClientError as e:
+            error = e.response['Error']
+            error_code = error['Code']
+            error_msg = error['Message']
+            
+            self.logger.error(f"Put object failed: {error_code} - {error_msg}")
+            raise UploadError(f"Upload failed: {error_msg}")
+            
+        except Exception as e:
+            self.logger.error(f"Unexpected error during put_object: {str(e)}")
+            raise UploadError(f"Upload failed: {str(e)}") 

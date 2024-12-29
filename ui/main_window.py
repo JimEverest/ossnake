@@ -44,19 +44,20 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
     def create_menu(self):
         """创建菜单栏"""
         self.menubar = tk.Menu(self)
+        self.config(menu=self.menubar)
         
         # 文件菜单
-        file_menu = tk.Menu(self.menubar, tearoff=0)
-        file_menu.add_command(label="退出", command=self.on_closing)
-        self.menubar.add_cascade(label="文件", menu=file_menu)
+        self.file_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="文件", menu=self.file_menu)
+        self.file_menu.add_command(label="设置", command=self.show_settings)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="退出", command=self.quit)
         
         # 帮助菜单
         help_menu = tk.Menu(self.menubar, tearoff=0)
         help_menu.add_command(label="关于", command=self.show_about)
         self.menubar.add_cascade(label="帮助", menu=help_menu)
         
-        self.config(menu=self.menubar)
-    
     def create_main_frame(self):
         """创建主框架"""
         # 创建主容器
@@ -176,3 +177,9 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
             self.status_bar.config(text=f"当前存储桶: {bucket_name}")
             # 加载对象列表
             self.object_list.load_objects()
+    
+    def show_settings(self):
+        """显示设置对话框"""
+        from .components.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        dialog.wait_window()

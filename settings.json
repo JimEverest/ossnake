@@ -1,0 +1,41 @@
+{
+    "proxy": {
+        "enabled": true,
+        "http": "http://127.0.0.1:33210",
+        "https": "http://127.0.0.1:33210"
+    },
+    "api": {
+        "enabled": true,
+        "port": 8001,
+        "default_oss": "aws"
+    },
+    "upload": {
+        "multipart_enabled": true,
+        "chunk_size": 6,
+        "workers": 6
+    },
+    "download": {
+        "multipart_enabled": true,
+        "chunk_size": 6,
+        "workers": 6
+    },
+    "default": {
+        "oss_source": "aws"
+    },
+    "list": {
+        "page_size": 1200
+    },
+    "security": {
+        "client_encryption": false,
+        "encryption_method": "AES-256",
+        "secure_transfer": false
+    },
+    "theme": {
+        "mode": "dark",
+        "color": "purple"
+    },
+    "advanced": {
+        "cache_size": 1024,
+        "log_level": "INFO"
+    }
+}
