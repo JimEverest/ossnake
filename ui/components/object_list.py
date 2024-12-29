@@ -225,10 +225,17 @@ class ObjectList(ttk.Frame):
     
     def show_context_menu(self, event):
         """显示右键菜单"""
-        item = self.tree.identify_row(event.y)
-        if item:
-            self.tree.selection_set(item)
-            self.context_menu.post(event.x_root, event.y_root)
+        # 获取点击位置的项目
+        clicked_item = self.tree.identify_row(event.y)
+        if not clicked_item:
+            return
+            
+        # 如果点击的项目不在当前选中项中，则更新选择
+        if clicked_item not in self.tree.selection():
+            self.tree.selection_set(clicked_item)
+        
+        # 显示菜单
+        self.context_menu.post(event.x_root, event.y_root)
     
     def download_selected(self):
         """下载选中的对象"""
@@ -370,20 +377,85 @@ class ObjectList(ttk.Frame):
         if not selection:
             return
             
-        # 获取选中的文件名
-        items = []
+        # 获取选中的项目
+        items_to_delete = []
         for item in selection:
             values = self.tree.item(item)['values']
-            if values and values[1] != '..':
-                items.append(values[1])
+            if values and values[1] != '..':  # 排除返回上级目录项
+                name = values[1]
+                is_dir = values[3] == '目录'
+                full_path = f"{self.current_path}/{name}".lstrip('/')
+                items_to_delete.append((full_path, is_dir))
         
-        if not items:
+        if not items_to_delete:
             return
             
         # 确认删除
-        if messagebox.askyesno("确认", f"确定要删除选中的 {len(items)} 个项目吗？"):
-            # TODO: 实现删除功能
-            messagebox.showinfo("提示", "删除功能即将实现")
+        count = len(items_to_delete)
+        if not messagebox.askyesno(
+            "确认删除",
+            f"确定要删除选中的 {count} 个项目吗？\n此操作不可恢复！",
+            icon='warning'
+        ):
+            return
+            
+        # 创建进度对话框
+        progress = ProgressDialog(self, "删除", "正在删除...")
+        
+        # 在后台线程中执行删除
+        thread = threading.Thread(
+            target=self._delete_items,
+            args=(items_to_delete, progress)
+        )
+        thread.daemon = True
+        thread.start()
+    
+    def _delete_items(self, items, progress):
+        """在后台线程中执行删除"""
+        try:
+            total_items = len(items)
+            for i, (path, is_dir) in enumerate(items, 1):
+                if progress.cancelled:
+                    break
+                    
+                try:
+                    # 更新进度
+                    progress.update_progress(
+                        i, total_items,
+                        f"正在删除: {path}"
+                    )
+                    
+                    if is_dir:
+                        # 删除目录
+                        objects = self.oss_client.list_objects(prefix=path)
+                        for obj in objects:
+                            if progress.cancelled:
+                                break
+                            self.oss_client.delete_file(obj['name'])
+                    else:
+                        # 删除文件
+                        self.oss_client.delete_file(path)
+                        
+                except Exception as e:
+                    self.logger.error(f"Failed to delete {path}: {str(e)}")
+                    if not messagebox.askyesno(
+                        "删除错误",
+                        f"删除 {path} 失败: {str(e)}\n是否继续删除其他项目？"
+                    ):
+                        break
+            
+            if progress.cancelled:
+                progress.file_var.set("已取消删除")
+            else:
+                progress.file_var.set("删除完成")
+                self.load_objects(self.current_path)  # 刷新列表
+                
+        except Exception as e:
+            self.logger.error(f"Delete operation failed: {str(e)}")
+            progress.file_var.set(f"删除失败: {str(e)}")
+        finally:
+            # 延迟关闭进度对话框
+            progress.after(1500, progress.destroy)
     
     def copy_path(self):
         """复制对象路径"""
