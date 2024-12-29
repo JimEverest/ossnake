@@ -32,7 +32,7 @@
     },
     "theme": {
         "mode": "dark",
-        "color": "purple"
+        "color": "orange"
     },
     "advanced": {
         "cache_size": 1024,

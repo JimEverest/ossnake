@@ -604,14 +604,23 @@ class SettingsDialog(tk.Toplevel):
                 proxy_manager.set_proxy(None)
                 
             # 重新初始化所有OSS客户端
-            self.parent.config_manager.reload_clients()
+            try:
+                self.parent.config_manager.reload_clients()
+            except Exception as e:
+                self.logger.error(f"Failed to reload clients: {e}")
+                messagebox.showwarning(
+                    "警告",
+                    "代理设置已保存，但重新连接OSS客户端失败。\n"
+                    "请尝试重启应用以应用新的代理设置。"
+                )
+                return True  # 仍然返回True因为设置已经保存
+            
+            return True
             
         except Exception as e:
             self.logger.error(f"Failed to apply proxy settings: {e}")
             messagebox.showerror("错误", f"应用代理设置失败: {str(e)}")
             return False
-        
-        return True
     
     def _validate_numeric_settings(self):
         """验证数值设置项"""

@@ -4,7 +4,7 @@ import json
 import os
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from typing import Dict
+from typing import Dict, Optional, List
 from driver.base_oss import BaseOSSClient
 from driver.aws_s3 import AWSS3Client
 from driver.oss_ali import AliyunOSSClient
@@ -19,8 +19,9 @@ class ConfigManager:
         self.logger = logging.getLogger(__name__)
         if not os.path.exists(self.CONFIG_FILE):
             self.save_config({})
-        # 初始化时就加载客户端
-        self.oss_clients = self.load_clients()
+        # 只加载配置，不初始化客户端
+        self.config = self.load_config()
+        self.oss_clients = {}
     
     def _init_client_with_timeout(self, client_class, config) -> tuple:
         """在超时限制内初始化客户端"""
@@ -35,54 +36,6 @@ class ConfigManager:
             except Exception as e:
                 self.logger.error(f"Failed to initialize client: {str(e)}")
                 return False, None
-    
-    def load_clients(self) -> Dict:
-        """从配置文件加载所有OSS客户端"""
-        config = self.load_config()
-        clients = {}
-        
-        # 处理AWS S3配置
-        if 'aws' in config:
-            aws_config = config['aws'].copy()
-            aws_config['provider'] = 'aws_s3'
-            if 'endpoint' not in aws_config:
-                aws_config['endpoint'] = None
-            
-            success, client = self._init_client_with_timeout(
-                AWSS3Client,
-                OSSConfig(**aws_config)
-            )
-            if success:
-                clients['aws'] = client
-                self.logger.info("AWS S3 client loaded successfully")
-        
-        # 处理阿里云OSS配置
-        if 'aliyun' in config:
-            aliyun_config = config['aliyun'].copy()
-            aliyun_config['provider'] = 'oss_ali'
-            
-            success, client = self._init_client_with_timeout(
-                AliyunOSSClient,
-                OSSConfig(**aliyun_config)
-            )
-            if success:
-                clients['aliyun'] = client
-                self.logger.info("Aliyun OSS client loaded successfully")
-        
-        # 处理MinIO配置
-        if 'minio' in config:
-            minio_config = config['minio'].copy()
-            minio_config['provider'] = 'minio'
-            
-            success, client = self._init_client_with_timeout(
-                MinioClient,
-                OSSConfig(**minio_config)
-            )
-            if success:
-                clients['minio'] = client
-                self.logger.info("MinIO client loaded successfully")
-        
-        return clients
     
     def load_config(self):
         try:
@@ -113,20 +66,59 @@ class ConfigManager:
     def reload_clients(self):
         """重新加载所有OSS客户端"""
         try:
-            # 重新加载客户端
-            new_clients = self.load_clients()
+            # 清除现有的客户端
+            self.oss_clients.clear()
             
-            # 如果成功加载了新的客户端，更新当前的客户端列表
-            self.oss_clients = new_clients
+            # 重新加载配置
+            self.config = self.load_config()
+            
+            # 重新初始化所有可用的客户端
+            for name in self.get_available_clients():
+                # 按需初始化客户端
+                client = self.get_client(name)
+                if client:
+                    self.logger.info(f"Successfully reloaded {name} client")
             
             # 如果有主窗口引用，更新UI
             if hasattr(self, 'main_window'):
                 self.main_window.update_oss_clients(self.oss_clients)
                 
-            self.logger.info("Successfully reloaded OSS clients")
+            self.logger.info("Successfully reloaded all clients")
             
         except Exception as e:
             self.logger.error(f"Failed to reload clients: {e}")
             raise
+    
+    def get_client(self, name: str) -> Optional[BaseOSSClient]:
+        """获取或初始化客户端"""
+        if name not in self.oss_clients:
+            # 客户端不存在时才初始化
+            if name in self.config:
+                client_config = self.config[name].copy()
+                client_config['provider'] = name
+                success, client = self._init_client_with_timeout(
+                    self._get_client_class(name),
+                    OSSConfig(**client_config)
+                )
+                if success:
+                    self.oss_clients[name] = client
+                    self.logger.info(f"{name} client loaded successfully")
+                else:
+                    return None
+        return self.oss_clients.get(name)
+    
+    def _get_client_class(self, provider: str):
+        """根据提供商获取客户端类"""
+        if provider == 'aliyun':
+            return AliyunOSSClient
+        elif provider == 'aws':
+            return AWSS3Client
+        elif provider == 'minio':
+            return MinioClient
+        raise ValueError(f"Unknown provider: {provider}")
+    
+    def get_available_clients(self) -> List[str]:
+        """获取可用的客户端列表"""
+        return list(self.config.keys())
     
     # 添加编辑功能

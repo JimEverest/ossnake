@@ -85,14 +85,16 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
         self.toolbar_frame = ttk.Frame(self.main_container)
         self.toolbar_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        if self.oss_clients:
+        # 获取可用的客户端列表
+        available_clients = self.config_manager.get_available_clients()
+        if available_clients:
             # 创建OSS源选择框
             ttk.Label(self.toolbar_frame, text="OSS源:").pack(side=tk.LEFT, padx=(5, 2))
             self.source_var = tk.StringVar()
             self.source_combo = ttk.Combobox(
                 self.toolbar_frame,
                 textvariable=self.source_var,
-                values=list(self.oss_clients.keys()),
+                values=available_clients,
                 state='readonly',
                 width=20
             )
@@ -100,36 +102,47 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
             self.source_combo.bind('<<ComboboxSelected>>', self.on_source_change)
             
             # 默认选择第一个源
-            first_source = list(self.oss_clients.keys())[0]
+            first_source = available_clients[0]
             self.source_combo.set(first_source)
             
-            # 创建内容区域框架
-            self.content_frame = ttk.Frame(self.main_container)
-            self.content_frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
-            
-            # 创建水平分隔窗格
-            self.paned = ttk.PanedWindow(self.content_frame, orient=tk.HORIZONTAL)
-            self.paned.pack(expand=True, fill=tk.BOTH)
-            
-            # 创建存储桶列表（左侧）
-            bucket_frame = ttk.Frame(self.paned)
-            self.bucket_list = BucketList(bucket_frame, self.oss_clients[first_source])
-            self.bucket_list.pack(expand=True, fill=tk.BOTH)
-            
-            # 创建对象列表（右侧）
-            object_frame = ttk.Frame(self.paned)
-            self.object_list = ObjectList(object_frame, self.oss_clients[first_source])
-            self.object_list.pack(expand=True, fill=tk.BOTH)
-            
-            # 添加到分隔窗格
-            self.paned.add(bucket_frame, weight=1)
-            self.paned.add(object_frame, weight=3)
-            
-            # 绑定存储桶选择事件
-            self.bucket_list.tree.bind('<<TreeviewSelect>>', self.on_bucket_select)
-            
-            # 更新状态栏
-            self.status_message = f"当前OSS源: {first_source}"
+            # 初始化第一个客户端
+            client = self.config_manager.get_client(first_source)
+            if client:
+                # 创建内容区域框架
+                self.content_frame = ttk.Frame(self.main_container)
+                self.content_frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+                
+                # 创建水平分隔窗格
+                self.paned = ttk.PanedWindow(self.content_frame, orient=tk.HORIZONTAL)
+                self.paned.pack(expand=True, fill=tk.BOTH)
+                
+                # 创建存储桶列表（左侧）
+                bucket_frame = ttk.Frame(self.paned)
+                self.bucket_list = BucketList(bucket_frame, client)  # 使用新获取的客户端
+                self.bucket_list.pack(expand=True, fill=tk.BOTH)
+                
+                # 创建对象列表（右侧）
+                object_frame = ttk.Frame(self.paned)
+                self.object_list = ObjectList(object_frame, client)  # 使用新获取的客户端
+                self.object_list.pack(expand=True, fill=tk.BOTH)
+                
+                # 添加到分隔窗格
+                self.paned.add(bucket_frame, weight=1)
+                self.paned.add(object_frame, weight=3)
+                
+                # 绑定存储桶选择事件
+                self.bucket_list.tree.bind('<<TreeviewSelect>>', self.on_bucket_select)
+                
+                # 更新状态栏
+                self.status_message = f"当前OSS源: {first_source}"
+            else:
+                messagebox.showwarning("警告", f"无法连接到 {first_source}")
+                # 显示错误信息
+                ttk.Label(
+                    self.main_container,
+                    text=f"无法连接到 {first_source}\n请检查网络连接或配置",
+                    font=('Helvetica', 12)
+                ).pack(expand=True)
         else:
             # 显示提示信息
             ttk.Label(
@@ -154,11 +167,12 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
         selected = self.source_var.get()
         if selected and self.bucket_list and self.object_list:
             try:
-                # 更新两个列表的客户端
-                client = self.oss_clients[selected]
-                if not hasattr(client, 'connected') or not client.connected:
-                    raise ConnectionError(f"OSS源 {selected} 未连接")
+                # 获取新的客户端
+                client = self.config_manager.get_client(selected)
+                if not client:
+                    raise ConnectionError(f"无法连接到 {selected}")
                 
+                # 更新两个列表的客户端
                 self.bucket_list.set_oss_client(client)
                 self.object_list.set_oss_client(client)
                 self.status_bar.config(text=f"当前OSS源: {selected}")
