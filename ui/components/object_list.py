@@ -10,6 +10,8 @@ from .progress_dialog import ProgressDialog
 import threading
 from .toast import Toast  # 添加导入
 from utils.file_type_manager import FileTypeManager, FileAction
+from utils.clipboard_helper import ClipboardHelper
+import io
 
 # 尝试导入 tkinterdnd2，如果不可用则禁用拖放功能
 try:
@@ -113,6 +115,8 @@ class ObjectList(ttk.Frame):
         self.context_menu.add_command(label="重命名", command=self.rename_selected)
         self.context_menu.add_command(label="删除", command=self.delete_selected)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="粘贴", command=self.paste_from_clipboard)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="新建文件夹", command=self.create_folder)
         self.context_menu.add_command(label="新建文本文件", command=self.create_text_file)
         self.context_menu.add_separator()
@@ -127,6 +131,9 @@ class ObjectList(ttk.Frame):
         if DRAG_DROP_SUPPORTED:
             self.tree.drop_target_register('DND_Files')
             self.tree.dnd_bind('<<Drop>>', self.on_drop)
+        
+        # 绑定 Ctrl+V 快捷键
+        self.bind_all('<Control-v>', lambda e: self.paste_from_clipboard())
     
     def load_objects(self, path: str = ""):
         """加载对象列表"""
@@ -970,3 +977,130 @@ class ObjectList(ttk.Frame):
             except Exception as e:
                 self.logger.error(f"Failed to create text file {result['name']}: {str(e)}")
                 messagebox.showerror("错误", f"创建文件失败: {str(e)}") 
+    
+    def paste_from_clipboard(self):
+        """处理剪贴板粘贴操作"""
+        try:
+            self.logger.debug("Attempting to paste from clipboard")
+            # 这里先添加一个基本的实现，后续扩展
+            self.process_clipboard_content()
+        except Exception as e:
+            self.logger.error(f"Failed to paste from clipboard: {str(e)}")
+            messagebox.showerror("错误", f"粘贴失败: {str(e)}")
+    
+    def process_clipboard_content(self):
+        """处理剪贴板内容"""
+        clipboard = ClipboardHelper()
+        content_type, content = clipboard.get_clipboard_type()
+        
+        if not content_type:
+            messagebox.showinfo("提示", "剪贴板中没有可上传的内容")
+            return
+        
+        try:
+            if content_type == "files":
+                self._handle_clipboard_files(content)
+            elif content_type == "image":
+                self._handle_clipboard_image(content)
+        except Exception as e:
+            self.logger.error(f"Failed to process clipboard content: {str(e)}")
+            messagebox.showerror("错误", f"处理剪贴板内容失败: {str(e)}")
+    
+    def _handle_clipboard_files(self, files):
+        """处理剪贴板中的文件"""
+        if not files:
+            return
+        
+        try:
+            for file_path in files:
+                try:
+                    # 获取文件名并确保使用正确的路径分隔符
+                    filename = os.path.basename(file_path)
+                    full_path = '/'.join([self.current_path, filename]).strip('/')
+                    
+                    # 读取文件内容
+                    with open(file_path, 'rb') as f:
+                        data = f.read()
+                    
+                    # 直接上传文件，与 create_text_file 相同的方式
+                    self.oss_client.put_object(full_path, data)
+                    
+                except Exception as upload_error:
+                    error_msg = str(upload_error)
+                    self.logger.error(f"Failed to upload file {file_path}: {error_msg}")
+                    messagebox.showerror(
+                        "错误",
+                        f"上传文件失败 {filename}: {error_msg}"
+                    )
+            
+            # 上传完成后刷新列表
+            self.load_objects(self.current_path)
+            # 显示成功提示
+            Toast(self, "文件上传完成")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to upload files: {str(e)}")
+            messagebox.showerror("错误", f"上传失败: {str(e)}")
+    
+    def _handle_clipboard_image(self, image):
+        """处理剪贴板中的图片"""
+        if not image:
+            return
+        
+        try:
+            # 生成临时文件名
+            filename = ClipboardHelper.generate_image_filename()
+            full_path = '/'.join([self.current_path, filename]).strip('/')
+            
+            # 将图片转换为字节流
+            buffer = io.BytesIO()
+            image.save(buffer, format='PNG')
+            image_data = buffer.getvalue()
+            
+            # 创建进度对话框
+            progress = ProgressDialog(
+                self,
+                title="上传进度",
+                message=f"正在上传图片: {filename}"
+            )
+            
+            # 在新线程中执行上传
+            thread = threading.Thread(
+                target=self._upload_clipboard_image,
+                args=(full_path, image_data, progress)
+            )
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to handle clipboard image: {str(e)}")
+            messagebox.showerror("错误", f"处理剪贴板图片失败: {str(e)}")
+    
+    def _upload_clipboard_image(self, full_path: str, image_data: bytes, progress: ProgressDialog):
+        """上传剪贴板图片"""
+        error = None  # 用于存储错误信息
+        try:
+            # 使用现有的上传功能
+            self.oss_client.put_object(
+                full_path,
+                image_data
+            )
+            
+            # 在主线程中更新UI
+            self.after(0, lambda: self._on_clipboard_image_uploaded(full_path))
+            
+        except Exception as e:
+            error = str(e)  # 保存错误信息
+            self.logger.error(f"Failed to upload clipboard image: {error}")
+            # 使用保存的错误信息
+            self.after(0, lambda err=error: messagebox.showerror("错误", f"上传图片失败: {err}"))
+        finally:
+            self.after(0, progress.destroy)
+    
+    def _on_clipboard_image_uploaded(self, path: str):
+        """剪贴板图片上传完成的处理"""
+        # 刷新文件列表
+        self.load_objects(self.current_path)
+        
+        # 显示成功提示
+        Toast(self, f"已上传图片: {os.path.basename(path)}") 

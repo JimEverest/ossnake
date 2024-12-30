@@ -1,5 +1,5 @@
 tkinter
-pillow
+pillow>=10.0.0
 python-vlc
 requests
 boto3
@@ -11,3 +11,4 @@ pydantic
 pytest
 pytest-html
 pytest-cov
+pywin32>=305
