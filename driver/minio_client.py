@@ -4,7 +4,7 @@ import minio
 from minio.error import S3Error
 import os
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from io import BytesIO
 import time
 import tempfile
@@ -41,70 +41,68 @@ class MinioClient(BaseOSSClient):
 
     def __init__(self, config: OSSConfig):
         """初始化MinIO客户端"""
-        super().__init__(config)  # 调用基类的初始化方法
-        self.logger = logging.getLogger(__name__)
+        super().__init__(config)  # 这会调用_init_client
         
+    def _init_client(self) -> None:
+        """初始化MinIO客户端"""
         try:
             # 配置代理
             http_client_args = {
-                'timeout': urllib3.Timeout.DEFAULT_TIMEOUT,
+                'timeout': urllib3.Timeout(connect=10, read=30),
                 'maxsize': 10,
                 'retries': urllib3.Retry(
                     total=3,
                     backoff_factor=0.2,
                     status_forcelist=[500, 502, 503, 504]
-                )
+                ),
+                'cert_reqs': 'CERT_NONE'
             }
             
             # 根据是否有代理使用不同的HTTP客户端
             if self.proxy_settings and (self.proxy_settings.get('http') or self.proxy_settings.get('https')):
                 proxy_url = self.proxy_settings.get('https') or self.proxy_settings.get('http')
+                
+                # 从代理URL中提取认证信息
+                parsed = urlparse(proxy_url)
+                proxy_headers = None
+                
+                if '@' in parsed.netloc:
+                    auth = parsed.netloc.split('@')[0]
+                    credentials = auth.split(':')
+                    if len(credentials) == 2:
+                        import base64
+                        auth_str = base64.b64encode(f"{credentials[0]}:{credentials[1]}".encode()).decode()
+                        proxy_headers = {
+                            'Proxy-Authorization': f'Basic {auth_str}'
+                        }
+                        # 重构不带认证信息的代理URL
+                        proxy_host = parsed.netloc.split('@')[1]
+                        proxy_url = urlunparse(parsed._replace(netloc=proxy_host))
+                
+                self.logger.info(f"Creating proxy manager with URL: {proxy_url}")
                 http_client = urllib3.ProxyManager(
                     proxy_url,
+                    proxy_headers=proxy_headers,
                     **http_client_args
                 )
-                self.logger.info(f"Using proxy: {proxy_url}")
             else:
                 http_client = urllib3.PoolManager(**http_client_args)
             
             # 创建MinIO客户端
             self.client = Minio(
-                endpoint=config.endpoint,
-                access_key=config.access_key,
-                secret_key=config.secret_key,
-                secure=config.secure,
-                http_client=http_client
-            )
-            self.connected = True
-            self.logger.info(f"MinIO client initialized with endpoint: {config.endpoint}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize MinIO client: {str(e)}")
-            raise ConnectionError(f"Failed to connect to MinIO: {str(e)}")
-
-    def _init_client(self) -> None:
-        """初始化MinIO客户端"""
-        try:
-            # 创建 HTTP 客户端配置
-            http_client = self._create_http_client_config()
-            
-            # 创建MinIO客户端
-            self.client = Minio(
-                self.config.endpoint,
+                endpoint=self.config.endpoint,
                 access_key=self.config.access_key,
                 secret_key=self.config.secret_key,
                 secure=self.config.secure,
                 http_client=http_client
             )
-            
-            # 测试连接
-            self.client.list_buckets()
-            self.logger.info("Successfully connected to MinIO server")
+            self.connected = True
+            self.logger.info(f"MinIO client initialized with endpoint: {self.config.endpoint}")
             
         except Exception as e:
-            self.logger.error(f"Failed to connect to MinIO server: {str(e)}")
-            raise ConnectionError(f"Failed to connect to MinIO server: {str(e)}")
-    
+            self.logger.error(f"Failed to initialize MinIO client: {str(e)}")
+            raise ConnectionError(f"Failed to connect to MinIO: {str(e)}")
+
     def _create_http_client_config(self):
         """创建HTTP客户端配置"""
         # 基本的超时和重试配置

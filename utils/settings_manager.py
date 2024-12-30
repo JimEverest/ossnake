@@ -1,7 +1,7 @@
 import json
 import os
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class SettingsManager:
     """设置管理器"""
@@ -86,14 +86,16 @@ class SettingsManager:
                     result[key] = value
         return result 
     
-    def get_proxy_settings(self) -> dict:
-        """获取代理设置
-        Returns:
-            dict: 包含 http 和 https 代理设置的字典，如果代理未启用则返回 None
-        """
-        if self.settings["proxy"]["enabled"]:
-            return {
-                "http": self.settings["proxy"]["http"] if self.settings["proxy"]["http"] else None,
-                "https": self.settings["proxy"]["https"] if self.settings["proxy"]["https"] else None
-            }
+    def get_proxy_settings(self) -> Optional[Dict[str, str]]:
+        """获取代理设置"""
+        settings = self.load_settings()
+        if settings.get("proxy", {}).get("enabled", False):
+            # 只有在启用代理且有有效地址时才返回
+            http_proxy = settings["proxy"].get("http", "").strip()
+            https_proxy = settings["proxy"].get("https", "").strip()
+            if http_proxy or https_proxy:
+                return {
+                    "http": http_proxy or None,
+                    "https": https_proxy or None
+                }
         return None 

@@ -31,14 +31,17 @@ class AWSS3Client(BaseOSSClient):
         """初始化AWS S3客户端"""
         super().__init__(config)  # 调用基类的初始化方法
         
+    def _init_client(self) -> None:
+        """初始化AWS S3客户端"""
         try:
             # 创建会话配置
             session_config = {
-                'aws_access_key_id': config.access_key,
-                'aws_secret_access_key': config.secret_key,
-                'region_name': config.region
+                'aws_access_key_id': self.config.access_key,
+                'aws_secret_access_key': self.config.secret_key,
+                'region_name': self.config.region
             }
             
+            # 创建会话
             self.session = boto3.Session(**session_config)
             
             # 创建客户端配置
@@ -48,59 +51,40 @@ class AWSS3Client(BaseOSSClient):
             
             # 设置代理配置
             if self.proxy_settings:
+                self.logger.info(f"Configuring AWS S3 client with proxy: {self.proxy_settings}")
                 client_config = Config(
-                    proxies={
-                        'http': self.proxy_settings.get('http'),
-                        'https': self.proxy_settings.get('https')
-                    },
+                    proxies=self.proxy_settings,
                     retries=dict(max_attempts=3)
                 )
+            else:
+                self.logger.info("AWS S3 client initialized without proxy")
             
+            # 创建S3客户端
             self.client = self.session.client(
                 's3',
-                endpoint_url=config.endpoint,
+                endpoint_url=self.config.endpoint if self.config.endpoint else None,
+                config=client_config,
+                use_ssl=self.config.secure,
+                verify=False
+            )
+            
+            # 创建S3资源对象（用于高级操作）
+            self.resource = self.session.resource(
+                's3',
+                endpoint_url=self.config.endpoint if self.config.endpoint else None,
                 config=client_config
             )
+            
+            # 创建Bucket引用
+            if self.config.bucket_name:
+                self.bucket = self.resource.Bucket(self.config.bucket_name)
+            
             self.connected = True
+            self.logger.info(f"AWS S3 client initialized with endpoint: {self.config.endpoint}")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize AWS S3 client: {str(e)}")
             raise ConnectionError(f"Failed to connect to AWS S3: {str(e)}")
-
-    def _init_client(self) -> None:
-        """初始化AWS S3客户端"""
-        # 配置客户端
-        config = Config(
-            retries=dict(
-                max_attempts=3  # 重试次数
-            ),
-            connect_timeout=30,
-            read_timeout=30,
-            proxies=self.config.proxy if self.config.proxy else None
-        )
-        
-        # 创建S3客户端
-        self.client = boto3.client(
-            's3',
-            aws_access_key_id=self.config.access_key,
-            aws_secret_access_key=self.config.secret_key,
-            endpoint_url=self.config.endpoint if self.config.endpoint else None,
-            region_name=self.config.region,
-            config=config,
-            use_ssl=self.config.secure
-        )
-        
-        # 创建S3资源对象（用于某些高级操作）
-        self.resource = boto3.resource(
-            's3',
-            aws_access_key_id=self.config.access_key,
-            aws_secret_access_key=self.config.secret_key,
-            endpoint_url=self.config.endpoint if self.config.endpoint else None,
-            region_name=self.config.region,
-            config=config
-        )
-        
-        self.bucket = self.resource.Bucket(self.config.bucket_name)
 
     def _upload_file(
         self,
@@ -329,8 +313,20 @@ class AWSS3Client(BaseOSSClient):
                 raise OSSError(f"Failed to delete file {object_name}: {str(e)}")
 
     def list_objects(self, prefix: str = '', recursive: bool = True) -> List[Dict]:
-        """列出对象，返回包含详细信息的字典列表"""
+        """列出对象"""
         try:
+            self.logger.info(f"Listing objects with prefix '{prefix}'")
+            self.logger.info(f"Using proxy: {self.proxy_settings}")
+            self.logger.info(f"Endpoint: {self.config.endpoint}")
+            self.logger.info(f"Region: {self.config.region}")
+            
+            # 记录当前环境变量
+            env_proxies = {
+                'HTTP_PROXY': os.environ.get('HTTP_PROXY'),
+                'HTTPS_PROXY': os.environ.get('HTTPS_PROXY')
+            }
+            self.logger.info(f"Current proxy environment: {env_proxies}")
+            
             objects = []
             paginator = self.client.get_paginator('list_objects_v2')
             pages = paginator.paginate(Bucket=self.config.bucket_name, Prefix=prefix)
@@ -715,3 +711,22 @@ class AWSS3Client(BaseOSSClient):
         except Exception as e:
             self.logger.error(f"Unexpected error during put_object: {str(e)}")
             raise UploadError(f"Upload failed: {str(e)}") 
+
+
+
+    def delete_objects(self, object_names: List[str]) -> None:
+        """批量删除对象"""
+        try:
+            objects_to_delete = [{'Key': name} for name in object_names]
+            self.bucket.delete_objects(Delete={'Objects': objects_to_delete})
+        except Exception as e:
+            raise OSSError(f"Failed to delete objects: {str(e)}")
+
+    def copy_objects(self, source_prefix: str, target_prefix: str) -> None:
+        """批量复制对象"""
+        try:
+            for obj in self.bucket.objects.filter(Prefix=source_prefix):
+                target_key = obj.key.replace(source_prefix, target_prefix, 1)
+                self.bucket.copy({'Bucket': self.config.bucket_name, 'Key': obj.key}, target_key)
+        except Exception as e:
+            raise OSSError(f"Failed to copy objects: {str(e)}") 

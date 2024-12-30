@@ -24,7 +24,7 @@ class ObjectList(ttk.Frame):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.oss_client = oss_client
-        self.current_path = ""  # 当前路径
+        self.current_path = ""
         
         # 定义图标字符
         self.icons = {
@@ -38,8 +38,9 @@ class ObjectList(ttk.Frame):
         style.configure('Treeview', rowheight=24)  # 增加行高以适应Unicode字符
         
         self.create_widgets()
+        # 延迟加载对象列表
         if self.oss_client:
-            self.load_objects()
+            self.after(100, self.load_objects)  # 使用 after 延迟加载
     
     def create_widgets(self):
         """创建列表组件"""
@@ -126,9 +127,15 @@ class ObjectList(ttk.Frame):
             self.tree.drop_target_register('DND_Files')
             self.tree.dnd_bind('<<Drop>>', self.on_drop)
     
-    def load_objects(self, path=""):
-        """加载指定路径下的对象"""
+    def load_objects(self, path: str = ""):
+        """加载对象列表"""
         try:
+            self.logger.info(f"Loading objects from path: {path}")
+            if hasattr(self.oss_client, 'proxy_settings'):
+                self.logger.info(f"Current proxy settings: {self.oss_client.proxy_settings}")
+            
+            objects = self.oss_client.list_objects(prefix=path)
+            
             # 清空现有项目
             for item in self.tree.get_children():
                 self.tree.delete(item)

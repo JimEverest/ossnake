@@ -8,6 +8,8 @@ import logging
 from utils.config_manager import ConfigManager
 from .components.bucket_list import BucketList
 from .components.object_list import ObjectList
+import os
+import urllib3
 
 try:
     import tkinterdnd2 as tkdnd
@@ -17,46 +19,62 @@ except ImportError:
     DRAG_DROP_SUPPORTED = False
     logging.warning("tkinterdnd2 not available, drag and drop will be disabled")
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
     def __init__(self):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         
-        # 配置管理
+        # 1. 先加载代理设置
+        self._load_proxy_settings()
+        
+        # 2. 再初始化配置管理器
         self.config_manager = ConfigManager()
         self.config_manager.main_window = self
-        # 不需要再次加载客户端，因为ConfigManager初始化时已经加载了
         self.oss_clients = self.config_manager.oss_clients
         
-        # 基本窗口设置
+        # 3. 最后创建UI
         self.title("OSS Explorer")
         self.geometry("1024x768")
         self.minsize(800, 600)
         
-        # 创建基本布局
         self.create_menu()
-        self.create_main_frame()  # 先创建主框架
-        self.create_status_bar()  # 状态栏最后创建
+        self.create_main_frame()
+        self.create_status_bar()
         
-        # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        # 加载并应用代理设置
-        self._load_proxy_settings()
-        
         self.logger.info("Main window initialized")
     
     def _load_proxy_settings(self):
         """加载并应用代理设置"""
-        from utils.settings_manager import SettingsManager
-        from utils.proxy_manager import ProxyManager
-        
-        settings_manager = SettingsManager()
-        proxy_manager = ProxyManager()
-        
-        # 获取并应用代理设置
-        proxy_settings = settings_manager.get_proxy_settings()
-        proxy_manager.set_proxy(proxy_settings)
+        try:
+            from utils.settings_manager import SettingsManager  # 添加导入
+            from utils.proxy_manager import ProxyManager
+            
+            settings_manager = SettingsManager()
+            proxy_manager = ProxyManager()
+            
+            settings = settings_manager.load_settings()
+            self.logger.info(f"Proxy settings in config: {settings.get('proxy', {})}")
+            
+            proxy_settings = settings_manager.get_proxy_settings()
+            self.logger.info(f"Loaded proxy settings: {proxy_settings}")
+            
+            proxy_manager.set_proxy(proxy_settings)
+            self.logger.info(f"Applied proxy settings: {proxy_manager.get_proxy()}")
+            
+            # 检查环境变量
+            env_proxies = {
+                'HTTP_PROXY': os.environ.get('HTTP_PROXY'),
+                'HTTPS_PROXY': os.environ.get('HTTPS_PROXY'),
+                'http_proxy': os.environ.get('http_proxy'),
+                'https_proxy': os.environ.get('https_proxy')
+            }
+            self.logger.info(f"Current proxy environment variables: {env_proxies}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load proxy settings: {str(e)}", exc_info=True)
     
     def create_menu(self):
         """创建菜单栏"""

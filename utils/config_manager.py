@@ -10,6 +10,7 @@ from driver.aws_s3 import AWSS3Client
 from driver.oss_ali import AliyunOSSClient
 from driver.minio_client import MinioClient
 from driver.types import OSSConfig
+from utils.proxy_manager import ProxyManager
 
 class ConfigManager:
     CONFIG_FILE = "config.json"
@@ -28,6 +29,11 @@ class ConfigManager:
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(client_class, config)
             try:
+                # 获取当前代理状态
+                proxy_manager = ProxyManager()
+                proxy_settings = proxy_manager.get_proxy()
+                self.logger.info(f"Initializing client with proxy settings: {proxy_settings}")
+                
                 client = future.result(timeout=self.TIMEOUT)
                 return True, client
             except TimeoutError:
@@ -92,8 +98,13 @@ class ConfigManager:
     def get_client(self, name: str) -> Optional[BaseOSSClient]:
         """获取或初始化客户端"""
         if name not in self.oss_clients:
-            # 客户端不存在时才初始化
             if name in self.config:
+                # 确保代理设置已经加载
+                proxy_manager = ProxyManager()
+                if not hasattr(self, '_proxy_checked'):
+                    self.logger.info(f"Current proxy settings: {proxy_manager.get_proxy()}")
+                    self._proxy_checked = True
+                
                 client_config = self.config[name].copy()
                 client_config['provider'] = name
                 success, client = self._init_client_with_timeout(

@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import logging
 from utils.settings_manager import SettingsManager
+from utils.proxy_manager import ProxyManager
 
 def with_timeout(timeout_seconds=30):
     """超时装饰器"""
@@ -30,20 +31,28 @@ class BaseOSSClient(ABC):
     
     def __init__(self, config: OSSConfig):
         self.config = config
-        self.connected = False
         self.logger = logging.getLogger(__name__)
+        self.connected = False
         
-        # 获取当前代理设置
-        settings_manager = SettingsManager()
-        self.proxy_settings = settings_manager.get_proxy_settings()
+        # 获取代理设置并记录日志
+        proxy_manager = ProxyManager()
+        self.proxy_settings = proxy_manager.get_proxy()
         
-        try:
-            self._init_client_with_timeout()
-            self.connected = True
-        except Exception as e:
-            self.logger.error(f"Failed to initialize client: {str(e)}")
-            self.connected = False
-            raise
+        # 记录详细的代理信息
+        self.logger.info(f"Initializing OSS client for endpoint: {config.endpoint}")
+        self.logger.info(f"Using proxy settings: {self.proxy_settings}")
+        
+        # 记录环境变量状态
+        env_proxies = {
+            'HTTP_PROXY': os.environ.get('HTTP_PROXY'),
+            'HTTPS_PROXY': os.environ.get('HTTPS_PROXY'),
+            'http_proxy': os.environ.get('http_proxy'),
+            'https_proxy': os.environ.get('https_proxy')
+        }
+        self.logger.info(f"Current proxy environment variables: {env_proxies}")
+        
+        # 初始化客户端
+        self._init_client()
     
     @with_timeout(30)
     def _init_client_with_timeout(self):

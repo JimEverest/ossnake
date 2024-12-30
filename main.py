@@ -3,6 +3,10 @@
 import logging
 import sys
 from ui.main_window import MainWindow
+import urllib3
+
+# 禁用 urllib3 的不安全请求警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def setup_logging():
     logging.basicConfig(
