@@ -9,6 +9,7 @@ from tkinter import filedialog
 from .progress_dialog import ProgressDialog
 import threading
 from .toast import Toast  # 添加导入
+from utils.file_type_manager import FileTypeManager, FileAction
 
 # 尝试导入 tkinterdnd2，如果不可用则禁用拖放功能
 try:
@@ -130,6 +131,9 @@ class ObjectList(ttk.Frame):
     def load_objects(self, path: str = ""):
         """加载对象列表"""
         try:
+            # 确保路径使用正确的分隔符
+            path = path.replace('\\', '/')
+            
             self.logger.info(f"Loading objects from path: {path}")
             if hasattr(self.oss_client, 'proxy_settings'):
                 self.logger.info(f"Current proxy settings: {self.oss_client.proxy_settings}")
@@ -217,6 +221,20 @@ class ObjectList(ttk.Frame):
             self.logger.error(f"Failed to load objects: {str(e)}")
             messagebox.showerror("错误", f"加载对象失败: {str(e)}")
     
+    def navigate_up(self):
+        """返回上级目录"""
+        parent_path = '/'.join(self.current_path.split('/')[:-1])
+        self.load_objects(parent_path)
+
+    def navigate_to(self, dir_name: str):
+        """进入指定目录"""
+        import posixpath
+        # 使用 posixpath 来确保使用正确的路径分隔符
+        new_path = posixpath.join(self.current_path, dir_name).lstrip('/')
+        # 记录日志以便调试
+        self.logger.debug(f"Entering directory: {dir_name} -> {new_path}")
+        self.load_objects(new_path)
+
     def on_double_click(self, event):
         """处理双击事件"""
         item = self.tree.selection()[0]
@@ -224,16 +242,45 @@ class ObjectList(ttk.Frame):
         if not values:
             return
             
-        name = values[1]  # 获取原始名称，不做任何转换
+        name = values[1]
         if name == '..':  # 返回上级目录
-            parent_path = '/'.join(self.current_path.split('/')[:-1])
-            self.load_objects(parent_path)
-        elif 'directory' in self.tree.item(item)['tags']:  # 进入目录
-            # 保持原始名称，不要做任何数值转换
-            new_path = f"{self.current_path}/{name}".lstrip('/')
-            # 记录日志以便调试
-            self.logger.debug(f"Entering directory: {name} -> {new_path}")
-            self.load_objects(new_path)
+            self.navigate_up()
+            return
+        
+        if values[3] == '目录':  # 进入目录
+            self.navigate_to(name)
+            return
+        
+        # 处理文件
+        from utils.file_type_manager import FileTypeManager, FileAction
+        
+        file_manager = FileTypeManager()
+        handler_class, action = file_manager.get_handler(name)
+        
+        if handler_class:
+            try:
+                # 使用 posixpath 来确保使用正确的路径分隔符
+                import posixpath
+                full_path = posixpath.join(self.current_path, name).lstrip('/')
+                
+                # 根据处理器是否需要 mode 参数来创建实例
+                if handler_class.__name__ == 'TextEditor':
+                    handler = handler_class(
+                        self,
+                        self.oss_client,
+                        full_path,
+                        mode="edit" if action == FileAction.BOTH else "view"
+                    )
+                else:
+                    handler = handler_class(
+                        self,
+                        self.oss_client,
+                        full_path
+                    )
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to open file: {str(e)}")
+                messagebox.showerror("错误", f"无法打开文件: {str(e)}")
     
     def show_context_menu(self, event):
         """显示右键菜单"""

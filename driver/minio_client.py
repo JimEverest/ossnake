@@ -899,3 +899,21 @@ class MinioClient(BaseOSSClient):
         except S3Error as e:
             self.logger.error(f"Put object failed: {str(e)}")
             raise UploadError(f"Upload failed: {str(e)}")
+
+    def get_object(self, object_name: str) -> bytes:
+        """获取对象内容"""
+        try:
+            response = self.client.get_object(
+                self.config.bucket_name,
+                object_name
+            )
+            return response.read()
+            
+        except S3Error as e:
+            if e.code == 'NoSuchKey':
+                raise ObjectNotFoundError(f"Object not found: {object_name}")
+            raise OSSError(f"Failed to get object: {str(e)}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get object {object_name}: {str(e)}")
+            raise OSSError(f"Failed to get object: {str(e)}")

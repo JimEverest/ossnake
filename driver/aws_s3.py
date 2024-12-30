@@ -730,3 +730,28 @@ class AWSS3Client(BaseOSSClient):
                 self.bucket.copy({'Bucket': self.config.bucket_name, 'Key': obj.key}, target_key)
         except Exception as e:
             raise OSSError(f"Failed to copy objects: {str(e)}") 
+
+    def get_object(self, object_name: str) -> bytes:
+        """获取对象内容
+        Args:
+            object_name: 对象名称
+        Returns:
+            bytes: 对象内容
+        Raises:
+            ObjectNotFoundError: 对象不存在
+            OSSError: 其他错误
+        """
+        try:
+            self.logger.debug(f"Getting object: {object_name}")
+            response = self.client.get_object(
+                Bucket=self.config.bucket_name,
+                Key=object_name
+            )
+            return response['Body'].read()
+            
+        except self.client.exceptions.NoSuchKey:
+            raise ObjectNotFoundError(f"Object not found: {object_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get object {object_name}: {str(e)}")
+            raise OSSError(f"Failed to get object: {str(e)}") 

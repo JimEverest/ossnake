@@ -363,3 +363,34 @@ class AliyunOSSClient(BaseOSSClient):
         except OssError as e:
             self.logger.error(f"Put object failed: {str(e)}")
             raise UploadError(f"Upload failed: {str(e)}")
+
+    def get_object(self, object_name: str) -> bytes:
+        """获取对象内容
+        Args:
+            object_name: 对象名称
+        Returns:
+            bytes: 对象内容
+        Raises:
+            ObjectNotFoundError: 对象不存在
+            OSSError: 其他错误
+        """
+        try:
+            self.logger.debug(f"Getting object: {object_name}")
+            
+            # 使用 oss2 的 get_object 方法获取对象
+            response = self.bucket.get_object(object_name)
+            
+            # 读取所有内容
+            content = response.read()
+            
+            # 关闭响应
+            response.close()
+            
+            return content
+            
+        except oss2.exceptions.NoSuchKey:
+            raise ObjectNotFoundError(f"Object not found: {object_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get object {object_name}: {str(e)}")
+            raise OSSError(f"Failed to get object: {str(e)}")

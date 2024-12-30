@@ -210,3 +210,16 @@ class BaseOSSClient(ABC):
         
         # 其他错误
         raise UploadError(f"Operation failed: {error_msg}", **error_info)
+    
+    @abstractmethod
+    def get_object(self, object_name: str) -> bytes:
+        """获取对象内容
+        Args:
+            object_name: 对象名称
+        Returns:
+            bytes: 对象内容
+        Raises:
+            ObjectNotFoundError: 对象不存在
+            OSSError: 其他错误
+        """
+        pass
