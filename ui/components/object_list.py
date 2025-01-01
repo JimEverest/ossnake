@@ -236,6 +236,9 @@ class ObjectList(ttk.Frame):
     def navigate_to(self, dir_name: str):
         """进入指定目录"""
         import posixpath
+        # 确保 dir_name 是字符串类型
+        dir_name = str(dir_name)  # 添加这一行来确保类型转换
+        
         # 使用 posixpath 来确保使用正确的路径分隔符
         new_path = posixpath.join(self.current_path, dir_name).lstrip('/')
         # 记录日志以便调试
