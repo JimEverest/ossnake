@@ -304,39 +304,103 @@ class MinioClient(BaseOSSClient):
             if 'NoSuchKey' not in str(e):
                 raise OSSError(f"Failed to delete file: {str(e)}")
 
-    def list_objects(self, prefix: str = '', recursive: bool = True) -> List[Dict]:
-        """列出MinIO对象"""
+    def list_objects(self, prefix: str = '', recursive: bool = False) -> List[Dict]:
+        """列出MinIO对象
+        Args:
+            prefix: 前缀过滤
+            recursive: 是否递归列出子目录，默认False表示显示文件夹结构
+        Returns:
+            List[Dict]: 对象列表
+        """
         try:
+            self.logger.info(f"Starting to list objects with prefix: '{prefix}', recursive: {recursive}")
+            
+            # 规范化前缀
+            if prefix and not prefix.endswith('/'):
+                prefix = prefix + '/'
+            
+            self.logger.debug(f"Using normalized prefix: '{prefix}'")
+            
             objects = []
+            total_files = 0
+            total_folders = 0
+            
+            # 使用MinIO的list_objects方法，不使用delimiter参数
             items = self.client.list_objects(
                 self.config.bucket_name,
                 prefix=prefix,
                 recursive=recursive
             )
             
+            # 跟踪已处理的文件夹
+            processed_folders = set()
+            
             for item in items:
-                # 保持原始名称，不做任何转换
-                name = str(item.object_name)  # 确保是字符串类型
-                
-                if item.is_dir:
-                    objects.append({
-                        'name': name,  # 保持原始名称
-                        'type': 'directory',
-                        'size': 0,
-                        'last_modified': None
-                    })
-                else:
-                    objects.append({
-                        'name': name,  # 保持原始名称
-                        'type': 'file',
-                        'size': item.size,
-                        'last_modified': item.last_modified,
-                        'etag': item.etag.strip('"')
-                    })
+                try:
+                    # 获取对象名称
+                    name = str(item.object_name)
                     
+                    # 跳过空对象
+                    if not name:
+                        continue
+                    
+                    # 如果不是递归模式，需要手动处理文件夹结构
+                    if not recursive:
+                        # 获取当前对象的所有父文件夹路径
+                        parts = name.split('/')
+                        for i in range(len(parts)):
+                            if i < len(parts) - 1:  # 不处理最后一个部分（文件名）
+                                folder_path = '/'.join(parts[:i+1]) + '/'
+                                if folder_path not in processed_folders:
+                                    folder_name = parts[i]
+                                    if prefix and folder_path.startswith(prefix):
+                                        # 只显示当前层级的文件夹名称
+                                        folder_name = folder_path[len(prefix):].rstrip('/')
+                                        if '/' in folder_name:
+                                            folder_name = folder_name.split('/')[0]
+                                    
+                                    self.logger.debug(f"Adding folder: {folder_name} (full path: {folder_path})")
+                                    
+                                    objects.append({
+                                        'name': folder_path,  # 保存完整路径
+                                        'display_name': folder_name,  # 显示名称
+                                        'size': 0,
+                                        'last_modified': None,
+                                        'type': 'folder'
+                                    })
+                                    processed_folders.add(folder_path)
+                                    total_folders += 1
+                    
+                    # 处理文件
+                    if not name.endswith('/'):  # 跳过文件夹标记
+                        self.logger.debug(f"Adding file: {name}, size: {item.size}")
+                        
+                        # 如果不是递归模式，只显示当前层级的文件
+                        if not recursive:
+                            if prefix:
+                                # 检查文件是否在当前层级
+                                relative_path = name[len(prefix):]
+                                if '/' in relative_path:
+                                    continue  # 跳过子文件夹中的文件
+                        
+                        objects.append({
+                            'name': name,
+                            'size': item.size,
+                            'last_modified': item.last_modified,
+                            'type': 'file',
+                            'etag': item.etag.strip('"') if item.etag else None
+                        })
+                        total_files += 1
+                        
+                except Exception as e:
+                    self.logger.error(f"Error processing object {getattr(item, 'object_name', 'unknown')}: {str(e)}")
+                    continue
+            
+            self.logger.info(f"Successfully listed {total_files} files and {total_folders} folders for prefix '{prefix}'")
             return objects
             
-        except S3Error as e:
+        except Exception as e:
+            self.logger.error(f"Failed to list objects: {str(e)}")
             if 'NoSuchBucket' in str(e):
                 raise BucketNotFoundError(str(e))
             elif 'AccessDenied' in str(e):

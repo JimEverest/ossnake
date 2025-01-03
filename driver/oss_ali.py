@@ -78,19 +78,71 @@ class AliyunOSSClient(BaseOSSClient):
         except OssError as e:
             raise OSSError(f"Failed to delete file {object_name}: {str(e)}")
 
-    def list_objects(self, prefix: str = '', recursive: bool = True) -> List[Dict]:
-        """列出对象"""
+    def list_objects(self, prefix: str = '', recursive: bool = False) -> List[Dict]:
+        """列出对象
+        Args:
+            prefix: 前缀过滤
+            recursive: 是否递归列出子目录，默认False表示显示文件夹结构
+        Returns:
+            List[Dict]: 对象列表
+        """
+        self.logger.info(f"Starting to list objects with prefix: '{prefix}', recursive: {recursive}")
+        
         try:
-            objects = []
-            for obj in ObjectIterator(self.bucket, prefix=prefix):
-                objects.append({
-                    'name': obj.key,
-                    'size': obj.size,
-                    'last_modified': obj.last_modified,
-                    'type': 'file'
-                })
-            return objects
-        except OssError as e:
+            all_objects = []
+            delimiter = '' if recursive else '/'
+            continuation_token = None
+            total_files = 0
+            total_folders = 0
+            
+            # 如果前缀不为空且不以/结尾，添加/
+            if prefix and not prefix.endswith('/'):
+                prefix = prefix + '/'
+            
+            self.logger.debug(f"Using normalized prefix: '{prefix}'")
+            
+            while True:
+                self.logger.debug(f"Fetching page with marker: {continuation_token}")
+                result = self._list_objects_page(prefix, delimiter, continuation_token)
+                
+                # 添加文件
+                all_objects.extend(result['objects'])
+                total_files += len(result['objects'])
+                
+                # 如果不是递归模式，添加文件夹
+                if not recursive:
+                    for prefix_path in result['common_prefixes']:
+                        # 从完整前缀路径中提取文件夹名称
+                        folder_name = prefix_path
+                        if prefix and folder_name.startswith(prefix):
+                            # 只显示当前层级的文件夹名称
+                            folder_name = folder_name[len(prefix):]
+                            if folder_name.endswith('/'):
+                                folder_name = folder_name[:-1]
+                        
+                        self.logger.debug(f"Adding folder: {folder_name} (full path: {prefix_path})")
+                        
+                        all_objects.append({
+                            'name': prefix_path,  # 保存完整路径
+                            'display_name': folder_name,  # 显示名称
+                            'size': 0,
+                            'last_modified': None,
+                            'type': 'folder'
+                        })
+                        total_folders += 1
+                
+                self.logger.debug(f"Retrieved {len(result['objects'])} files and {len(result['common_prefixes'])} folders in this page")
+                
+                # 检查是否还有更多页
+                continuation_token = result.get('next_token')
+                if not continuation_token:
+                    break
+                    
+            self.logger.info(f"Successfully listed {total_files} files and {total_folders} folders for prefix '{prefix}'")
+            return all_objects
+            
+        except Exception as e:
+            self.logger.error(f"Failed to list objects: {str(e)}")
             raise OSSError(f"Failed to list objects: {str(e)}")
 
     def get_presigned_url(self, object_name: str, expires: int = 3600) -> str:
@@ -394,3 +446,67 @@ class AliyunOSSClient(BaseOSSClient):
         except Exception as e:
             self.logger.error(f"Failed to get object {object_name}: {str(e)}")
             raise OSSError(f"Failed to get object: {str(e)}")
+
+    def _list_objects_page(self, prefix: str = '', delimiter: str = '/', continuation_token: str = None) -> dict:
+        """获取一页对象列表"""
+        try:
+            self.logger.debug(f"Listing objects page with prefix='{prefix}', delimiter='{delimiter}', marker='{continuation_token}'")
+            
+            # 构建请求参数
+            params = {
+                'prefix': prefix,
+                'delimiter': delimiter,
+                'max_keys': 1000
+            }
+            
+            if continuation_token:
+                params['marker'] = continuation_token
+            
+            # 获取一页数据
+            result = self.bucket.list_objects(**params)
+            
+            self.logger.debug(f"Raw response - is_truncated: {result.is_truncated}, next_marker: {result.next_marker}")
+            
+            # 处理文件夹（CommonPrefixes）
+            common_prefixes = []
+            if hasattr(result, 'prefix_list'):
+                for prefix_info in result.prefix_list:
+                    # 确保我们获取正确的前缀值
+                    if hasattr(prefix_info, 'prefix'):
+                        prefix_path = prefix_info.prefix
+                    else:
+                        prefix_path = prefix_info
+                    self.logger.debug(f"Found common prefix (folder): {prefix_path}")
+                    common_prefixes.append(prefix_path)
+            
+            # 处理文件
+            objects = []
+            for obj in result.object_list:
+                # 跳过表示目录的对象
+                if obj.key.endswith('/'):
+                    self.logger.debug(f"Skipping directory marker: {obj.key}")
+                    continue
+                
+                # 处理时间戳
+                last_modified = obj.last_modified
+                self.logger.debug(f"Processing object: {obj.key}, size: {obj.size}, last_modified: {last_modified}")
+                
+                objects.append({
+                    'name': obj.key,
+                    'size': obj.size,
+                    'last_modified': last_modified,
+                    'type': 'file'
+                })
+            
+            response = {
+                'objects': objects,
+                'common_prefixes': common_prefixes,
+                'next_token': result.next_marker if result.is_truncated else None
+            }
+            
+            self.logger.debug(f"Page result - files: {len(objects)}, folders: {len(common_prefixes)}, has_more: {result.is_truncated}")
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Failed to list objects page: {str(e)}")
+            raise OSSError(f"Failed to list objects page: {str(e)}")

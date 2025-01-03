@@ -755,3 +755,43 @@ class AWSS3Client(BaseOSSClient):
         except Exception as e:
             self.logger.error(f"Failed to get object {object_name}: {str(e)}")
             raise OSSError(f"Failed to get object: {str(e)}") 
+
+    def _list_objects_page(self, prefix: str = '', delimiter: str = '/', continuation_token: str = None) -> dict:
+        """获取一页对象列表"""
+        try:
+            params = {
+                'Bucket': self.config.bucket_name,
+                'Prefix': prefix,
+                'Delimiter': delimiter,
+                'MaxKeys': 1000
+            }
+            
+            if continuation_token:
+                params['ContinuationToken'] = continuation_token
+            
+            response = self.client.list_objects_v2(**params)
+            
+            # 处理文件夹
+            common_prefixes = []
+            for prefix in response.get('CommonPrefixes', []):
+                common_prefixes.append(prefix.get('Prefix', ''))
+            
+            # 处理文件
+            objects = []
+            for obj in response.get('Contents', []):
+                objects.append({
+                    'name': obj['Key'],
+                    'size': obj['Size'],
+                    'last_modified': obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'type': 'file'
+                })
+            
+            return {
+                'objects': objects,
+                'common_prefixes': common_prefixes,
+                'next_token': response.get('NextContinuationToken')
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to list objects page: {str(e)}")
+            raise 

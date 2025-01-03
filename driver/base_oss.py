@@ -114,10 +114,60 @@ class BaseOSSClient(ABC):
         """删除对象"""
         pass
     
-    @abstractmethod
-    def list_objects(self, prefix: str = '', recursive: bool = True) -> List[Dict]:
-        """列出对象，返回包含详细信息的字典列表"""
-        pass
+    def list_objects(self, prefix: str = '', delimiter: str = '/') -> List[Dict]:
+        """列出对象，支持分页加载所有对象
+        Args:
+            prefix: 前缀
+            delimiter: 分隔符，用于模拟文件夹结构
+        Returns:
+            List[Dict]: 对象列表，每个对象包含 name, size, last_modified, type 等信息
+        """
+        try:
+            all_objects = []
+            folders = set()  # 用于去重文件夹
+            
+            # 获取所有对象
+            continuation_token = None
+            while True:
+                result = self._list_objects_page(
+                    prefix=prefix,
+                    delimiter=delimiter,
+                    continuation_token=continuation_token
+                )
+                
+                # 处理文件夹
+                for prefix in result.get('common_prefixes', []):
+                    folder_name = prefix.rstrip('/')
+                    if folder_name not in folders and folder_name != prefix:
+                        folders.add(folder_name)
+                        all_objects.append({
+                            'name': folder_name,
+                            'type': 'folder',
+                            'size': 0,
+                            'last_modified': None
+                        })
+                
+                # 处理文件
+                for obj in result.get('objects', []):
+                    if obj['name'] != prefix:  # 排除当前目录
+                        all_objects.append(obj)
+                
+                # 检查是否还有更多数据
+                continuation_token = result.get('next_token')
+                if not continuation_token:
+                    break
+            
+            # 排序：文件夹在前，同类型按名称排序
+            all_objects.sort(key=lambda x: (
+                0 if x['type'] == 'folder' else 1,  # 文件夹优先
+                x['name'].lower()  # 按名称排序
+            ))
+            
+            return all_objects
+            
+        except Exception as e:
+            self.logger.error(f"Failed to list objects: {str(e)}")
+            raise
     
     @abstractmethod
     def get_presigned_url(self, object_name: str, expires: int = 3600) -> str:

@@ -55,8 +55,15 @@ class ConfigManager:
             return {}
     
     def save_config(self, config):
-        with open(self.CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
+        """保存配置"""
+        try:
+            with open(self.CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=4)
+            self.config = config  # 更新内存中的配置
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to save config: {e}")
+            return False
     
     def add_client(self, name: str, config: dict):
         config_data = self.load_config()
@@ -106,9 +113,13 @@ class ConfigManager:
                     self._proxy_checked = True
                 
                 client_config = self.config[name].copy()
-                client_config['provider'] = name
+                provider = client_config.get('provider')  # 从配置中获取provider
+                if not provider:
+                    self.logger.error(f"No provider specified for {name}")
+                    return None
+                
                 success, client = self._init_client_with_timeout(
-                    self._get_client_class(name),
+                    self._get_client_class(provider),  # 使用provider来获取客户端类
                     OSSConfig(**client_config)
                 )
                 if success:
@@ -120,6 +131,10 @@ class ConfigManager:
     
     def _get_client_class(self, provider: str):
         """根据提供商获取客户端类"""
+        if not provider:
+            raise ValueError("No provider specified")
+        
+        provider = provider.lower()  # 转换为小写以确保匹配
         if provider == 'aliyun':
             return AliyunOSSClient
         elif provider == 'aws':

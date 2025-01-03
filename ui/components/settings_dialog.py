@@ -315,6 +315,56 @@ class SettingsDialog(tk.Toplevel):
             variable=self.secure_transfer_var
         ).pack(anchor=tk.W)
         
+        # 在 notebook 中添加 OSS源 标签页
+        self.oss_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.oss_frame, text="OSS源")
+        
+        # 创建OSS源列表框架
+        oss_list_frame = ttk.Frame(self.oss_frame)
+        oss_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 创建工具栏
+        toolbar = ttk.Frame(oss_list_frame)
+        toolbar.pack(fill=tk.X, pady=(0, 5))
+        
+        # 添加按钮
+        ttk.Button(toolbar, text="添加", command=self._add_oss_source).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="编辑", command=self._edit_oss_source).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="删除", command=self._delete_oss_source).pack(side=tk.LEFT, padx=2)
+        
+        # 创建Treeview
+        self.oss_tree = ttk.Treeview(
+            oss_list_frame,
+            columns=('name', 'type', 'region', 'status'),
+            show='headings'
+        )
+        
+        # 设置列
+        self.oss_tree.heading('name', text='名称')
+        self.oss_tree.heading('type', text='类型')
+        self.oss_tree.heading('region', text='区域')
+        self.oss_tree.heading('status', text='状态')
+        
+        # 设置列宽
+        self.oss_tree.column('name', width=150)
+        self.oss_tree.column('type', width=100)
+        self.oss_tree.column('region', width=100)
+        self.oss_tree.column('status', width=80)
+        
+        # 添加双击编辑事件
+        self.oss_tree.bind('<Double-1>', lambda e: self._edit_oss_source())
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(oss_list_frame, orient=tk.VERTICAL, command=self.oss_tree.yview)
+        self.oss_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # 布局
+        self.oss_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 加载OSS源列表
+        self._load_oss_sources()
+        
         # 布局滚动区域
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -670,3 +720,104 @@ class SettingsDialog(tk.Toplevel):
         except Exception as e:
             self.logger.error(f"Failed to load OSS sources: {e}")
             return {}
+
+    def _load_oss_sources(self):
+        """加载OSS源列表"""
+        try:
+            # 清空现有项目
+            for item in self.oss_tree.get_children():
+                self.oss_tree.delete(item)
+            
+            # 从config_manager加载配置
+            config = self.config_manager.load_config()
+            
+            # 添加到树形列表
+            for name, source in config.items():
+                provider = source.get('provider', '未知')  # 从provider字段获取类型
+                status = "正常" if name in self.config_manager.oss_clients else "未连接"
+                self.oss_tree.insert('', tk.END, values=(
+                    name,
+                    provider,  # 使用provider作为类型
+                    source.get('region', '-'),
+                    status
+                ))
+                
+        except Exception as e:
+            self.logger.error(f"Failed to load OSS sources: {e}")
+            messagebox.showerror("错误", f"加载OSS源列表失败: {str(e)}")
+
+    def _add_oss_source(self):
+        """添加OSS源"""
+        from .oss_source_dialog import OSSSourceDialog
+        dialog = OSSSourceDialog(self, self.config_manager)
+        dialog.wait_window()
+
+    def _edit_oss_source(self):
+        """编辑OSS源"""
+        # 获取选中的项目
+        selected = self.oss_tree.selection()
+        if not selected:
+            messagebox.showwarning("提示", "请先选择要编辑的OSS源")
+            return
+        
+        try:
+            # 获取选中项的数据
+            item = self.oss_tree.item(selected[0])
+            name = item['values'][0]
+            
+            # 从配置中获取完整数据
+            config = self.config_manager.load_config()
+            if name not in config:
+                messagebox.showerror("错误", f"找不到OSS源: {name}")
+                return
+            
+            # 打开编辑对话框
+            from .oss_source_dialog import OSSSourceDialog
+            dialog = OSSSourceDialog(
+                self,
+                self.config_manager,
+                source_data=(name, config[name])  # 传入现有数据
+            )
+            dialog.wait_window()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to edit OSS source: {str(e)}")
+            messagebox.showerror("错误", f"编辑失败: {str(e)}")
+
+    def _delete_oss_source(self):
+        """删除OSS源"""
+        # 获取选中的项目
+        selected = self.oss_tree.selection()
+        if not selected:
+            messagebox.showwarning("提示", "请先选择要删除的OSS源")
+            return
+        
+        try:
+            # 获取选中项的数据
+            item = self.oss_tree.item(selected[0])
+            name = item['values'][0]
+            
+            # 确认删除
+            if not messagebox.askyesno("确认", f"确定要删除OSS源 '{name}' 吗？"):
+                return
+            
+            # 从配置中删除
+            config = self.config_manager.load_config()
+            if name in config:
+                del config[name]
+                
+                # 保存配置
+                if self.config_manager.save_config(config):
+                    # 从客户端列表中移除
+                    if name in self.config_manager.oss_clients:
+                        del self.config_manager.oss_clients[name]
+                    
+                    # 刷新列表
+                    self._load_oss_sources()
+                    messagebox.showinfo("成功", f"OSS源 '{name}' 已删除")
+                else:
+                    raise Exception("保存配置失败")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to delete OSS source: {str(e)}")
+            messagebox.showerror("错误", f"删除失败: {str(e)}")

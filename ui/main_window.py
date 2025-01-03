@@ -75,7 +75,7 @@ class MainWindow(tkdnd.Tk if DRAG_DROP_SUPPORTED else tk.Tk):
             
         except Exception as e:
             self.logger.error(f"Failed to load proxy settings: {str(e)}", exc_info=True)
-    
+        
     def create_menu(self):
         """创建菜单栏"""
         self.menubar = tk.Menu(self)

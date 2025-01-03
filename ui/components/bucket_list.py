@@ -64,12 +64,21 @@ class BucketList(ttk.Frame):
                 return
             
             # 获取并显示存储桶列表
-            # 由于目前我们只有一个bucket配置，直接显示当前bucket
             config = self.oss_client.config
+            
+            # 获取对象数量
+            try:
+                objects = self.oss_client.list_objects()
+                object_count = len([obj for obj in objects if obj['type'] == 'file'])  # 只统计文件数量
+            except Exception as e:
+                self.logger.error(f"Failed to get object count: {str(e)}")
+                object_count = '-'  # 如果获取失败，显示'-'
+            
+            # 显示存储桶信息
             self.tree.insert('', tk.END, values=(
                 config.bucket_name,
                 config.region or '-',
-                '0'  # 对象数暂时显示为0
+                str(object_count)  # 显示对象数量
             ))
             
             self.logger.info(f"Loaded bucket: {config.bucket_name}")
