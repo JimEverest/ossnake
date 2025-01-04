@@ -1,9 +1,13 @@
 # main.py
 
-import logging
+import os
 import sys
-from ui.main_window import MainWindow
+# 将项目根目录添加到 Python 路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import logging
 import urllib3
+from ossnake.ui.main_window import MainWindow
 
 # 禁用 urllib3 的不安全请求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

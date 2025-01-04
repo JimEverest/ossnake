@@ -7,8 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import logging
-from utils.settings_manager import SettingsManager
-from utils.proxy_manager import ProxyManager
+from ossnake.utils.proxy_manager import ProxyManager
 
 def with_timeout(timeout_seconds=30):
     """超时装饰器"""

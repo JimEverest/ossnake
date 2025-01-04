@@ -1,0 +1,41 @@
+{
+    "proxy": {
+        "enabled": false,
+        "http": "",
+        "https": ""
+    },
+    "api": {
+        "enabled": false,
+        "port": 8000,
+        "default_oss": ""
+    },
+    "upload": {
+        "multipart_enabled": true,
+        "chunk_size": 5,
+        "workers": 4
+    },
+    "download": {
+        "multipart_enabled": true,
+        "chunk_size": 5,
+        "workers": 4
+    },
+    "default": {
+        "oss_source": ""
+    },
+    "list": {
+        "page_size": 9991
+    },
+    "security": {
+        "client_encryption": false,
+        "encryption_method": "AES-256",
+        "secure_transfer": true
+    },
+    "theme": {
+        "mode": "system",
+        "color": "blue"
+    },
+    "advanced": {
+        "cache_size": 1024,
+        "log_level": "INFO"
+    }
+}

@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
-from driver.types import OSSConfig
+from ossnake.driver.types import OSSConfig
 
 class OSSSourceDialog(tk.Toplevel):
     """OSS源配置对话框"""
@@ -293,28 +293,24 @@ class OSSSourceDialog(tk.Toplevel):
     
     def save_source(self):
         """保存OSS源配置"""
-        config = self._get_config()
-        if not config:
-            return
-            
         try:
+            # 获取表单数据并验证
+            config = self._get_config()
+            if not config:  # 如果验证失败，_get_config 会返回 None
+                return
+            
+            # 获取名称
             name = self.name_var.get().strip()
             
-            # 检查是否已存在（新增模式）
-            if not self.source_data:
-                current_config = self.config_manager.load_config()
-                if name in current_config:
-                    messagebox.showerror("错误", f"OSS源 '{name}' 已存在")
-                    return
+            # 如果是编辑模式，先删除旧的
+            if self.source_data:  # 使用 source_data 判断是否是编辑模式
+                old_name = self.source_data[0]  # 获取原来的名称
+                self.config_manager.remove_client(old_name)
             
-            # 保存配置
-            current_config = self.config_manager.load_config()
-            current_config[name] = config
+            # 添加新配置
+            self.config_manager.add_client(name, config)
             
-            # 保存配置
-            self.config_manager.save_config(current_config)
-            
-            # 通知父窗口刷新
+            # 刷新父窗口的列表
             self.parent._load_oss_sources()
             
             # 显示成功提示

@@ -23,8 +23,8 @@ class FileTypeManager:
     
     def _init_mappings(self):
         """初始化基本的文件类型映射"""
-        from ui.viewers.text_editor import TextEditor
-        from ui.viewers.image_viewer import ImageViewer
+        from ossnake.ui.viewers.text_editor import TextEditor
+        from ossnake.ui.viewers.image_viewer import ImageViewer
         
         # 注册文本编辑器
         self.register_handler(

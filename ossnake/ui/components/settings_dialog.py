@@ -1,9 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
-from utils.settings_manager import SettingsManager
-from utils.config_manager import ConfigManager
-from utils.proxy_manager import ProxyManager
+from ossnake.utils.settings_manager import SettingsManager
+from ossnake.utils.config_manager import ConfigManager
+from ossnake.utils.proxy_manager import ProxyManager
 
 class SettingsDialog(tk.Toplevel):
     """设置对话框"""
@@ -641,7 +641,7 @@ class SettingsDialog(tk.Toplevel):
     def _apply_proxy_settings(self, proxy_settings: dict):
         """应用代理设置"""
         try:
-            from utils.proxy_manager import ProxyManager
+            from ossnake.utils.proxy_manager import ProxyManager
             proxy_manager = ProxyManager()
             
             if proxy_settings["enabled"]:
@@ -716,7 +716,8 @@ class SettingsDialog(tk.Toplevel):
     def load_oss_sources(self) -> dict:
         """从config.json加载OSS源配置"""
         try:
-            return self.config_manager.load_config()
+            config = self.config_manager.load_config()
+            return config.get("oss_clients", {})  # 修正：只返回 oss_clients 部分
         except Exception as e:
             self.logger.error(f"Failed to load OSS sources: {e}")
             return {}
@@ -730,14 +731,15 @@ class SettingsDialog(tk.Toplevel):
             
             # 从config_manager加载配置
             config = self.config_manager.load_config()
+            oss_clients = config.get("oss_clients", {})
             
             # 添加到树形列表
-            for name, source in config.items():
-                provider = source.get('provider', '未知')  # 从provider字段获取类型
+            for name, source in oss_clients.items():
+                provider = source.get('provider', '未知')
                 status = "正常" if name in self.config_manager.oss_clients else "未连接"
                 self.oss_tree.insert('', tk.END, values=(
                     name,
-                    provider,  # 使用provider作为类型
+                    provider,
                     source.get('region', '-'),
                     status
                 ))
@@ -767,7 +769,8 @@ class SettingsDialog(tk.Toplevel):
             
             # 从配置中获取完整数据
             config = self.config_manager.load_config()
-            if name not in config:
+            oss_clients = config.get("oss_clients", {})  # 修正：从 oss_clients 中获取
+            if name not in oss_clients:  # 修正：在 oss_clients 中查找
                 messagebox.showerror("错误", f"找不到OSS源: {name}")
                 return
             
@@ -776,7 +779,7 @@ class SettingsDialog(tk.Toplevel):
             dialog = OSSSourceDialog(
                 self,
                 self.config_manager,
-                source_data=(name, config[name])  # 传入现有数据
+                source_data=(name, oss_clients[name])  # 修正：传入正确的配置数据
             )
             dialog.wait_window()
             
@@ -801,23 +804,13 @@ class SettingsDialog(tk.Toplevel):
             if not messagebox.askyesno("确认", f"确定要删除OSS源 '{name}' 吗？"):
                 return
             
-            # 从配置中删除
-            config = self.config_manager.load_config()
-            if name in config:
-                del config[name]
-                
-                # 保存配置
-                if self.config_manager.save_config(config):
-                    # 从客户端列表中移除
-                    if name in self.config_manager.oss_clients:
-                        del self.config_manager.oss_clients[name]
-                    
-                    # 刷新列表
-                    self._load_oss_sources()
-                    messagebox.showinfo("成功", f"OSS源 '{name}' 已删除")
-                else:
-                    raise Exception("保存配置失败")
-                
+            # 使用 ConfigManager 的 remove_client 方法删除
+            self.config_manager.remove_client(name)
+            
+            # 刷新列表
+            self._load_oss_sources()
+            messagebox.showinfo("成功", f"OSS源 '{name}' 已删除")
+            
         except Exception as e:
             self.logger.error(f"Failed to delete OSS source: {str(e)}")
             messagebox.showerror("错误", f"删除失败: {str(e)}")

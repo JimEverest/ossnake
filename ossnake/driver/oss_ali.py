@@ -9,8 +9,8 @@ import logging
 from urllib.parse import urlparse
 import json
 
+from ossnake.driver.base_oss import BaseOSSClient
 from .types import OSSConfig, ProgressCallback, MultipartUpload
-from .base_oss import BaseOSSClient
 from .exceptions import (
     OSSError, ConnectionError, AuthenticationError, 
     ObjectNotFoundError, BucketNotFoundError,

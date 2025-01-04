@@ -5,14 +5,14 @@ with open("readme.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="ossnake",
-    version="0.1.1",
+    version="0.1.4",
     author="Jim Everest",
     author_email="your.email@example.com",
     description="A unified object storage browser supporting multiple cloud storage services",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/jimeverest/ossnake",
-    packages=find_packages(),
+    packages=find_packages(include=['ossnake', 'ossnake.*']),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -30,6 +30,7 @@ setup(
         "minio>=7.1.0",
         "Pillow>=9.0.0",
         "requests>=2.28.0",
+        "tkinterdnd2",
     ],
     entry_points={
         'console_scripts': [

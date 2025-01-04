@@ -9,8 +9,8 @@ from tkinter import filedialog
 from .progress_dialog import ProgressDialog
 import threading
 from .toast import Toast  # 添加导入
-from utils.file_type_manager import FileTypeManager, FileAction
-from utils.clipboard_helper import ClipboardHelper
+from ossnake.utils.file_type_manager import FileTypeManager, FileAction
+from ossnake.utils.clipboard_helper import ClipboardHelper
 import io
 
 # 尝试导入 tkinterdnd2，如果不可用则禁用拖放功能
@@ -262,7 +262,7 @@ class ObjectList(ttk.Frame):
             return
         
         # 处理文件
-        from utils.file_type_manager import FileTypeManager, FileAction
+        from ossnake.utils.file_type_manager import FileTypeManager, FileAction
         
         file_manager = FileTypeManager()
         handler_class, action = file_manager.get_handler(name)
@@ -598,7 +598,7 @@ class ObjectList(ttk.Frame):
                 remote_path = object_name
             
             # 使用传输管理器上传
-            from utils.transfer_manager import TransferManager
+            from ossnake.utils.transfer_manager import TransferManager
             manager = TransferManager(chunk_size=chunk_size)  # 确保使用相同的分片大小
             manager.upload_file(
                 self.oss_client,
